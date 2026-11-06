@@ -1,0 +1,49 @@
+---
+title: "TP_Bioestadistica"
+output: html_document
+---
+
+1. IntroducciónProblema de interés: 
+
+El cáncer de mama es una de las principales neoplasias a nivel global. Diagnosticar a tiempo si una masa es benigna o maligna reduce intervenciones innecesarias y agiliza tratamientos.   
+Dataset: Breast Cancer Wisconsin (Diagnostic) Data Set (UCI / Kaggle).   
+Pregunta PICO:   
+P (Población): Pacientes con masas mamarias detectadas por aspiración con aguja fina (FNA).
+I (Intervención/Exposición): Características morfológicas de los núcleos celulares (radio, textura, perimetro, área, suavidad, etc.).
+C (Comparación): Muestras de tejido benigno vs. maligno.
+O (Outcome/Resultado): Clasificación del tumor (Maligno = 1, Benigno = 0).
+Objetivo: Desarrollar un modelo multivariado predictivo/explicativo para clasificar el estado de malignidad.   
+
+2. Materiales y MétodosDiseño del estudio: 
+
+Estudio de corte transversal / observacional analítico retrospectivo con datos secundarios.   
+Participantes y Criterios de Selección:   
+Inclusión: Muestras digitalizadas de PAF de masas mamarias con diagnóstico histológico validado.
+Exclusión: Registros duplicados o inconclusos (si existieran).
+Variables:   Respuesta (Y): diagnosis (Dicotómica: M = Maligno, B = Benigno).   Explicatorias (X): Atributos cuantitativos continuos (radius_mean, texture_mean, perimeter_mean, area_mean, etc.).   Sesgos posibles: Sesgo de selección por conveniencia del centro médico de origen, sesgo de mala clasificación en la digitalización de imágenes.   Métodos Estadísticos:   Univariado: Test t de Student para muestras independientes o prueba de Mann-Whitney (según supuesto de normalidad con Shapiro-Wilk).   Multivariado: Regresión Logística Binaria. Evaluación del ajuste con prueba de Hosmer-Lemeshow, matriz de confusión (Sensibilidad, Especificidad, VPP, VPN) y Área Bajo la Curva (AUC-ROC).
+
+```{r}
+#Instalar paquetes
+install.packages(c("ResourceSelection", "pROC"))
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(ResourceSelection) # Para Hosmer-Lemeshow
+library(pROC)              # Para Curva ROC y AUC
+```
+
+```{r}
+# 1. Cargar la base
+datos <- read.csv("datos/data.csv")
+
+# 2. Exploración básica y limpieza
+datos <- datos %>% 
+  select(-X, -id) %>% # Eliminar columnas irrelevantes
+  mutate(diagnosis_num = ifelse(diagnosis == "M", 1, 0),
+         diagnosis = factor(diagnosis, levels = c("B", "M")))
+
+str(datos)
+table(datos$diagnosis)
+```
