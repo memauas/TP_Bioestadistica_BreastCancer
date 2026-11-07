@@ -1,49 +1,665 @@
 ---
-title: "TP_Bioestadistica"
-output: html_document
+title: "Características morfométricas nucleares y malignidad de masas mamarias"
+subtitle: "Trabajo Práctico Integrador — 16.43 Bioestadística (ITBA)"
+author: "Integrantes: COMPLETAR"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    df_print: kable
 ---
 
-1. IntroducciónProblema de interés: 
-
-El cáncer de mama es una de las principales neoplasias a nivel global. Diagnosticar a tiempo si una masa es benigna o maligna reduce intervenciones innecesarias y agiliza tratamientos.   
-Dataset: Breast Cancer Wisconsin (Diagnostic) Data Set (UCI / Kaggle).   
-Pregunta PICO:   
-P (Población): Pacientes con masas mamarias detectadas por aspiración con aguja fina (FNA).
-I (Intervención/Exposición): Características morfológicas de los núcleos celulares (radio, textura, perimetro, área, suavidad, etc.).
-C (Comparación): Muestras de tejido benigno vs. maligno.
-O (Outcome/Resultado): Clasificación del tumor (Maligno = 1, Benigno = 0).
-Objetivo: Desarrollar un modelo multivariado predictivo/explicativo para clasificar el estado de malignidad.   
-
-2. Materiales y MétodosDiseño del estudio: 
-
-Estudio de corte transversal / observacional analítico retrospectivo con datos secundarios.   
-Participantes y Criterios de Selección:   
-Inclusión: Muestras digitalizadas de PAF de masas mamarias con diagnóstico histológico validado.
-Exclusión: Registros duplicados o inconclusos (si existieran).
-Variables:   Respuesta (Y): diagnosis (Dicotómica: M = Maligno, B = Benigno).   Explicatorias (X): Atributos cuantitativos continuos (radius_mean, texture_mean, perimeter_mean, area_mean, etc.).   Sesgos posibles: Sesgo de selección por conveniencia del centro médico de origen, sesgo de mala clasificación en la digitalización de imágenes.   Métodos Estadísticos:   Univariado: Test t de Student para muestras independientes o prueba de Mann-Whitney (según supuesto de normalidad con Shapiro-Wilk).   Multivariado: Regresión Logística Binaria. Evaluación del ajuste con prueba de Hosmer-Lemeshow, matriz de confusión (Sensibilidad, Especificidad, VPP, VPN) y Área Bajo la Curva (AUC-ROC).
-
-```{r}
-#Instalar paquetes
-install.packages(c("ResourceSelection", "pROC"))
-```
-
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
-library(tidyverse)
-library(ResourceSelection) # Para Hosmer-Lemeshow
-library(pROC)              # Para Curva ROC y AUC
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", fig.width = 8, fig.height = 5, dpi = 110)
+
+# Paquetes necesarios (instalar una sola vez desde la consola, NO dentro del Rmd):
+# install.packages(c("dplyr", "tidyr", "ggplot2", "car", "pwr", "pROC", "gridExtra", "knitr"))
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(car)       # VIF
+library(pwr)       # cálculo de tamaño muestral y potencia
+library(pROC)      # curva ROC y AUC
+library(gridExtra)
+library(knitr)
+
+set.seed(2026)
+
+# Paleta y tema de gráficos
+col_dx <- c("Benigno" = "#2a78d6", "Maligno" = "#eb6834")
+theme_set(theme_minimal(base_size = 12) +
+            theme(panel.grid.minor = element_blank(),
+                  plot.title = element_text(face = "bold"),
+                  legend.position = "top"))
+
+# Formato de p-valores
+fp <- function(p) ifelse(p < 0.001, "< 0,001", formatC(p, format = "f", digits = 3, decimal.mark = ","))
+fn <- function(x, d = 2) formatC(x, format = "f", digits = d, decimal.mark = ",", big.mark = ".")
 ```
 
-```{r}
+# Introducción
+
+## Problema de interés
+
+El cáncer de mama es la neoplasia más diagnosticada en mujeres: en 2022 se estimaron alrededor de 2,3 millones de casos nuevos y 670.000 muertes en el mundo (Kim et al., 2025). Distinguir a tiempo si una masa mamaria es benigna o maligna permite evitar cirugías innecesarias y, a la vez, no demorar el tratamiento de los tumores malignos.
+
+La **punción aspirativa con aguja fina (PAF)** es un método mínimamente invasivo y de bajo costo para obtener células de la masa. Su principal limitación es que la interpretación citológica es visual y depende del observador. Para objetivarla, Street, Wolberg y Mangasarian (1993) desarrollaron un sistema de análisis de imágenes que digitaliza el preparado, delimita el contorno de cada núcleo celular y calcula diez características morfométricas (tamaño, textura, forma, etc.). La hipótesis subyacente es que los núcleos malignos son más grandes, más heterogéneos y de contorno más irregular.
+
+## Dataset y fuente
+
+- **Base:** *Breast Cancer Wisconsin (Diagnostic) Data Set* (WDBC).
+- **Origen:** University of Wisconsin Hospitals, Madison (EE. UU.). Autores: W. H. Wolberg, W. N. Street y O. L. Mangasarian. Donada al UCI Machine Learning Repository en noviembre de 1995 (DOI: 10.24432/C5DW2B).
+- **Obtenida de:** Kaggle, <https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data>.
+- **Contenido:** 569 masas mamarias (una fila por masa), el diagnóstico (benigno/maligno) y 30 variables cuantitativas: las 10 características nucleares, cada una resumida como media (`_mean`), error estándar (`_se`) y "peor" valor (`_worst`, promedio de los tres núcleos con mayor valor).
+
+## Objetivos
+
+**General:** evaluar la asociación entre las características morfométricas nucleares obtenidas por PAF y el diagnóstico de malignidad de masas mamarias.
+
+**Específicos:**
+
+1. Describir y comparar las características nucleares entre masas benignas y malignas (análisis univariado).
+2. Construir un modelo de regresión logística multivariado que identifique las características asociadas de forma independiente con la malignidad.
+3. Identificar posibles variables confusoras y modificadoras de efecto.
+4. Estimar la capacidad discriminativa del modelo (sensibilidad, especificidad, AUC).
+
+## Pregunta de investigación (PICO)
+
+> En mujeres con masas mamarias evaluadas por PAF, ¿las características morfométricas nucleares (tamaño, textura, suavidad y concavidad del contorno) se asocian de forma independiente con el diagnóstico de malignidad, y qué capacidad tienen en conjunto para discriminar tumores malignos de benignos?
+
+| Componente | Definición |
+|---|---|
+| **P** (población) | Masas mamarias de pacientes evaluadas mediante PAF en University of Wisconsin Hospitals. |
+| **I** (exposición) | Valores más altos de las características morfométricas de los núcleos celulares (radio, textura, suavidad, puntos cóncavos, etc.). |
+| **C** (comparación) | Valores más bajos de esas mismas características. |
+| **O** (outcome) | Diagnóstico de la masa: maligno (1) vs. benigno (0). |
+
+# Materiales y métodos
+
+## Diseño del estudio
+
+Estudio **observacional, analítico, de corte transversal y retrospectivo**, basado en datos secundarios. La exposición (características nucleares) y el outcome (diagnóstico) se registran para cada masa en un mismo momento, sin seguimiento ni intervención del investigador. Por su objetivo de evaluar la capacidad de un conjunto de variables para clasificar un diagnóstico, se trata además de un **estudio de exactitud diagnóstica**, por lo que se toman como referencia las guías **STARD** (además de STROBE para estudios observacionales).
+
+## Marco temporal
+
+Los casos provienen de la práctica clínica de University of Wisconsin Hospitals a comienzos de la década de 1990: el sistema de análisis se describió en 1993–1994 y la base se donó al repositorio UCI en noviembre de 1995. La fuente no informa las fechas exactas de inclusión de cada caso, lo que se considera una limitación.
+
+## Participantes
+
+**Criterios de inclusión:** masas mamarias con PAF cuyo preparado fue digitalizado y procesado por el sistema de análisis de imágenes, con diagnóstico final (benigno o maligno) registrado.
+
+**Criterios de exclusión:** registros duplicados, con datos faltantes en las variables de interés o con imágenes que no pudieran procesarse.
+
+```{r datos}
 # 1. Cargar la base
-datos <- read.csv("datos/data.csv")
+datos_raw <- read.csv("datos/data.csv")
 
-# 2. Exploración básica y limpieza
-datos <- datos %>% 
-  select(-X, -id) %>% # Eliminar columnas irrelevantes
+# 2. Limpieza
+# La columna "X" aparece vacía porque el CSV de Kaggle tiene una coma final en cada fila.
+datos <- datos_raw %>%
+  select(-X) %>%
   mutate(diagnosis_num = ifelse(diagnosis == "M", 1, 0),
-         diagnosis = factor(diagnosis, levels = c("B", "M")))
+         diagnostico   = factor(diagnosis, levels = c("B", "M"),
+                                labels = c("Benigno", "Maligno")))
 
-str(datos)
-table(datos$diagnosis)
+c(filas = nrow(datos),
+  duplicados = sum(duplicated(datos$id)),
+  datos_faltantes = sum(is.na(datos)))
+
+table(datos$diagnostico)
+round(prop.table(table(datos$diagnostico)) * 100, 1)
 ```
+
+No hubo registros duplicados ni datos faltantes, por lo que se incluyeron las **`r nrow(datos)` masas**: `r sum(datos$diagnosis_num == 0)` benignas (`r fn(100*mean(datos$diagnosis_num == 0),1)` %) y `r sum(datos$diagnosis_num == 1)` malignas (`r fn(100*mean(datos$diagnosis_num == 1),1)` %).
+
+## Variables
+
+**Variable respuesta (Y):** `diagnosis`, cualitativa nominal dicotómica (M = maligno = 1; B = benigno = 0). Sigue una distribución de **Bernoulli** con probabilidad *p* = P(maligno).
+
+**Variables explicativas (X):** las 10 características nucleares en su versión media (`_mean`). Todas son **cuantitativas continuas**, calculadas automáticamente por el software a partir de la imagen digitalizada: el operador marca aproximadamente cada núcleo y un algoritmo de contornos activos (*snakes*) ajusta el borde exacto.
+
+```{r tabla-variables, echo=FALSE}
+vars <- c("radius_mean", "texture_mean", "perimeter_mean", "area_mean",
+          "smoothness_mean", "compactness_mean", "concavity_mean",
+          "concave.points_mean", "symmetry_mean", "fractal_dimension_mean")
+etiq <- c("Radio", "Textura", "Perímetro", "Área", "Suavidad", "Compacidad",
+          "Concavidad", "Puntos cóncavos", "Simetría", "Dimensión fractal")
+names(etiq) <- vars
+
+data.frame(
+  Variable = vars,
+  `Característica` = etiq,
+  `Cómo se mide` = c(
+    "Distancia media del centro a los puntos del contorno",
+    "Desvío estándar de la escala de grises dentro del núcleo",
+    "Longitud del contorno nuclear",
+    "Área encerrada por el contorno",
+    "Variación local de las longitudes de los radios",
+    "Perímetro² / área − 1",
+    "Severidad de las porciones cóncavas del contorno",
+    "Número de porciones cóncavas del contorno",
+    "Simetría del núcleo respecto de su eje mayor",
+    "Aproximación de la \"línea de costa\" − 1"),
+  check.names = FALSE) %>% kable(row.names = FALSE)
+```
+
+Se excluyeron del análisis las versiones `_se` (miden la precisión de la estimación, no una característica del tumor) y `_worst` (están casi perfectamente correlacionadas con las medias). Incluirlas habría triplicado el número de variables con información redundante, aumentando la colinealidad y el sobreajuste.
+
+**Variable derivada:** a partir del análisis de supuestos (sección 3.3.3) la textura se categorizó en **terciles** (baja, media, alta), que se incluyen en el modelo mediante dos variables *dummy* con "baja" como categoría de referencia.
+
+## Posibles sesgos y cómo se abordan
+
+| Sesgo | Descripción | Abordaje |
+|---|---|---|
+| **Selección / espectro** | Casos de un único centro de referencia, no de una muestra poblacional; los tumores pueden ser más avanzados o más "típicos" que en la práctica general (Ransohoff y Feinstein, 1978). | No es corregible con los datos; se acota la validez externa a poblaciones similares y se lo explicita como limitación. |
+| **Verificación** | Si no todas las masas benignas tuvieron confirmación histológica (por ejemplo, confirmación por seguimiento), el estándar de referencia no es homogéneo. | La base no informa el método de confirmación por caso; se reconoce como limitación. |
+| **Información / medición** | El operador marca inicialmente cada núcleo y elige qué zona del preparado digitalizar; esto introduce variabilidad. | Las medidas son calculadas por software, lo que reduce la subjetividad respecto de la lectura visual. |
+| **Confusión** | Las características nucleares están fuertemente correlacionadas entre sí; la asociación cruda de una puede deberse a otra. | Análisis multivariado y evaluación del cambio en el OR crudo vs. ajustado (criterio del 10 %). |
+| **Sobreajuste / optimismo** | Evaluar el modelo con los mismos datos con que se ajustó sobreestima su rendimiento. | Modelo parsimonioso y validación cruzada de 10 particiones repetida. |
+
+## Cálculo del tamaño muestral y poder de la muestra
+
+```{r tamano-muestral}
+n_B <- sum(datos$diagnosis_num == 0)
+n_M <- sum(datos$diagnosis_num == 1)
+prev <- n_M / nrow(datos)
+
+# (a) Comparación univariada de dos grupos: efecto moderado (d de Cohen = 0,5),
+#     alfa = 0,05 bilateral, potencia = 0,80
+n_t <- pwr.t.test(d = 0.5, sig.level = 0.05, power = 0.80, type = "two.sample")$n
+n_mw <- n_t / 0.864   # corrección por eficiencia relativa asintótica de Mann-Whitney
+
+# (b) Regresión logística: regla de 10 eventos por variable (Peduzzi et al., 1996)
+k_sat <- 10
+n_logit <- 10 * k_sat / prev
+
+# (c) Poder de la muestra disponible
+pot_d03 <- pwr.t2n.test(n1 = n_B, n2 = n_M, d = 0.3, sig.level = 0.05)$power
+pot_d05 <- pwr.t2n.test(n1 = n_B, n2 = n_M, d = 0.5, sig.level = 0.05)$power
+d_min   <- pwr.t2n.test(n1 = n_B, n2 = n_M, power = 0.80, sig.level = 0.05)$d
+
+data.frame(
+  Criterio = c("Comparación de 2 grupos (t, d = 0,5)",
+               "Ídem, ajustado para Mann-Whitney",
+               "Regresión logística, 10 EPV con 10 variables"),
+  `n ideal` = c(paste(ceiling(n_t), "por grupo"),
+                paste(ceiling(n_mw), "por grupo"),
+                paste(ceiling(n_logit), "en total")),
+  check.names = FALSE) %>% kable(row.names = FALSE)
+```
+
+- **Tamaño ideal.** Para detectar una diferencia moderada (d = 0,5) entre grupos con α = 0,05 y potencia del 80 % se necesitan `r ceiling(n_mw)` masas por grupo con Mann-Whitney. Para el modelo logístico saturado con 10 variables, la regla de 10 eventos por variable (EPV) exige al menos `r ceiling(n_logit)` masas, dada una prevalencia de malignidad del `r fn(100*prev,1)` %.
+- **Muestra disponible.** Con `r n_B` benignas y `r n_M` malignas se superan ambos requisitos. El poder para detectar un efecto pequeño-moderado (d = 0,3) es de `r fn(100*pot_d03,1)` %, y el de un efecto moderado (d = 0,5), `r if (pot_d05 > 0.999) "superior al 99,9 %" else paste0("de ", fn(100*pot_d05,1), " %")`. El menor efecto detectable con 80 % de potencia es d = `r fn(d_min)`.
+- **EPV observados.** Con `r n_M` eventos, el modelo saturado tiene `r fn(n_M/k_sat,1)` EPV y el modelo final (5 coeficientes), `r fn(n_M/5,1)` EPV, muy por encima de 10.
+
+## Métodos estadísticos
+
+1. **Descriptivo:** mediana y rango intercuartílico (RIC) por grupo diagnóstico, y coeficiente de asimetría.
+2. **Normalidad:** test de Shapiro-Wilk en cada grupo. Homogeneidad de varianzas: test de Levene.
+3. **Comparación univariada:** si ambos grupos son normales, test *t* de Welch; si no, **test U de Mann-Whitney**. Como tamaño de efecto se informa la correlación biserial por rangos (*r*~rb~). Los p-valores se corrigen por comparaciones múltiples con el método de Holm. Para la textura en terciles se usa el test χ² de independencia. Se estiman además los OR crudos por regresión logística simple.
+4. **Colinealidad:** matriz de correlación de Spearman y factor de inflación de la varianza (VIF; se considera problemático un VIF > 5).
+5. **Multivariado:** regresión logística binaria. Las variables continuas se estandarizan (media 0, DE 1), de modo que cada OR expresa el cambio en los odds de malignidad por cada aumento de 1 desvío estándar. Se parte de un **modelo teórico saturado** con las 10 variables y se reduce eliminando la colinealidad y comparando modelos anidados con el test de razón de verosimilitud (LRT) y el AIC.
+6. **Supuestos del modelo:** independencia de las observaciones (una masa por fila), ausencia de multicolinealidad (VIF), linealidad entre cada predictor continuo y el logit (test de Box-Tidwell) y ausencia de observaciones influyentes (distancia de Cook).
+7. **Confusión y modificación de efecto:** se considera confusora una variable cuya exclusión cambia en más de un 10 % el OR de otra. La modificación de efecto se evalúa agregando términos de interacción y comparándolos con LRT.
+8. **Bondad de ajuste y desempeño:** test de Hosmer-Lemeshow, curva de calibración, matriz de confusión con punto de corte 0,5 (sensibilidad, especificidad, VPP, VPN) y AUC-ROC. El rendimiento se valida internamente por validación cruzada de 10 particiones repetida 10 veces.
+
+Nivel de significación: α = 0,05. Software: `r R.version.string`.
+
+# Resultados
+
+## Descripción de las variables
+
+```{r descriptivo}
+asimetria <- function(x) mean((x - mean(x))^3) / sd(x)^3
+
+desc <- lapply(vars, function(v) {
+  x <- datos[[v]]
+  xb <- x[datos$diagnostico == "Benigno"]; xm <- x[datos$diagnostico == "Maligno"]
+  med_ric <- function(z) paste0(fn(median(z), 3), " (", fn(quantile(z, .25), 3), "–", fn(quantile(z, .75), 3), ")")
+  data.frame(Variable = etiq[v],
+             `Benigno, mediana (RIC)` = med_ric(xb),
+             `Maligno, mediana (RIC)` = med_ric(xm),
+             `Asimetría` = fn(asimetria(x)),
+             `Shapiro p (B)` = fp(shapiro.test(xb)$p.value),
+             `Shapiro p (M)` = fp(shapiro.test(xm)$p.value),
+             `Levene p` = fp(leveneTest(x ~ datos$diagnostico)$`Pr(>F)`[1]),
+             check.names = FALSE)
+})
+desc <- do.call(rbind, desc); rownames(desc) <- NULL
+kable(desc, align = "lcccccc")
+```
+
+```{r fig-boxplots, fig.height=7, fig.cap="Figura 1. Distribución de las características nucleares según el diagnóstico."}
+datos %>%
+  select(diagnostico, all_of(vars)) %>%
+  pivot_longer(-diagnostico, names_to = "variable", values_to = "valor") %>%
+  mutate(variable = factor(etiq[variable], levels = etiq)) %>%
+  ggplot(aes(diagnostico, valor, fill = diagnostico)) +
+  geom_boxplot(width = 0.55, outlier.size = 0.8, outlier.alpha = 0.5, alpha = 0.85) +
+  facet_wrap(~ variable, scales = "free_y", ncol = 5) +
+  scale_fill_manual(values = col_dx) +
+  labs(x = NULL, y = NULL, fill = "Diagnóstico") +
+  theme(axis.text.x = element_blank())
+```
+
+Ninguna variable es normal en ambos grupos (Shapiro-Wilk p < 0,05 en casi todos los casos) y la mayoría presenta **asimetría positiva** (cola a derecha), algo esperable en medidas de tamaño y forma que son estrictamente positivas. En la mayoría de las variables las varianzas también difieren entre grupos (Levene). Por eso las comparaciones se hacen con el **test de Mann-Whitney**, que no requiere normalidad. La respuesta es dicotómica (Bernoulli), por lo que el modelo multivariado adecuado es la **regresión logística**.
+
+## Análisis univariado
+
+```{r univariado}
+sd_dat <- sapply(vars, function(v) sd(datos[[v]]))
+
+uni <- lapply(vars, function(v) {
+  x <- datos[[v]]
+  xb <- x[datos$diagnosis_num == 0]; xm <- x[datos$diagnosis_num == 1]
+  normal <- shapiro.test(xb)$p.value > 0.05 & shapiro.test(xm)$p.value > 0.05
+  if (normal) {
+    test <- "t de Welch"; p <- t.test(xm, xb)$p.value
+  } else {
+    test <- "Mann-Whitney"; p <- wilcox.test(xm, xb, exact = FALSE)$p.value
+  }
+  U <- wilcox.test(xm, xb, exact = FALSE)$statistic
+  r_rb <- 2 * U / (length(xm) * length(xb)) - 1
+  z <- (x - mean(x)) / sd(x)
+  m <- glm(datos$diagnosis_num ~ z, family = binomial)
+  or <- exp(c(coef(m)[2], confint.default(m)[2, ]))
+  data.frame(var = v, Variable = etiq[v], Test = test, p = p, r_rb = r_rb,
+             OR = or[1], LI = or[2], LS = or[3])
+})
+uni <- do.call(rbind, uni)
+uni$p_holm <- p.adjust(uni$p, method = "holm")
+
+uni %>%
+  transmute(Variable, Test, `p` = fp(p), `p (Holm)` = fp(p_holm),
+            `r rb` = fn(r_rb),
+            `OR crudo por 1 DE (IC 95 %)` = paste0(fn(OR), " (", fn(LI), "–", fn(LS), ")")) %>%
+  kable(row.names = FALSE, align = "llcccc")
+```
+
+Tras corregir por comparaciones múltiples, **`r sum(uni$p_holm < 0.05)` de las 10 características difieren significativamente** entre masas benignas y malignas. `r if (any(uni$p_holm >= 0.05)) paste0("Solo la ", paste(tolower(uni$Variable[uni$p_holm >= 0.05]), collapse = " y la "), " no muestra diferencias. ") else ""`Los efectos más grandes corresponden a las medidas de **tamaño** (radio, perímetro, área) y de **concavidad del contorno** (puntos cóncavos, concavidad), con *r*~rb~ cercanos a 0,9: en esas variables, una masa maligna tiene un valor mayor que una benigna en la gran mayoría de los pares comparados. La textura y la suavidad muestran efectos moderados.
+
+```{r textura-terciles}
+cortes_tex <- quantile(datos$texture_mean, c(0, 1/3, 2/3, 1))
+datos <- datos %>%
+  mutate(textura_cat = cut(texture_mean, cortes_tex, include.lowest = TRUE,
+                           labels = c("Baja", "Media", "Alta")))
+
+tab_tex <- table(Textura = datos$textura_cat, `Diagnóstico` = datos$diagnostico)
+tab_tex
+round(prop.table(tab_tex, 1) * 100, 1)
+chi_tex <- chisq.test(tab_tex)
+chi_tex
+```
+
+```{r fig-textura, fig.height=3.8, fig.width=6, fig.cap="Figura 2. Proporción de masas malignas según el tercil de textura."}
+datos %>%
+  group_by(textura_cat) %>%
+  summarise(prop = mean(diagnosis_num), n = n()) %>%
+  ggplot(aes(textura_cat, prop)) +
+  geom_col(fill = col_dx["Maligno"], width = 0.6) +
+  geom_text(aes(label = paste0(fn(100 * prop, 0), " %")), vjust = -0.5) +
+  scale_y_continuous(labels = function(x) paste0(x * 100, " %"), limits = c(0, 0.8)) +
+  labs(x = "Tercil de textura", y = "Masas malignas")
+```
+
+La proporción de malignidad crece con la textura: `r fn(100*prop.table(tab_tex,1)[1,2],1)` % en el tercil bajo, `r fn(100*prop.table(tab_tex,1)[2,2],1)` % en el medio y `r fn(100*prop.table(tab_tex,1)[3,2],1)` % en el alto (χ² = `r fn(chi_tex$statistic,1)`, gl = 2, p `r fp(chi_tex$p.value)`).
+
+## Análisis multivariado
+
+### Elección del modelo
+
+Como la variable respuesta es dicotómica, se utiliza **regresión logística binaria**:
+
+$$\text{logit}(p) = \ln\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 X_1 + \dots + \beta_k X_k$$
+
+donde *p* = P(maligno). El modelo permite estimar el OR de cada característica **ajustado** por las demás y obtener una probabilidad predicha de malignidad para cada masa.
+
+### Modelo teórico saturado
+
+```{r saturado}
+# Variables estandarizadas: OR por cada aumento de 1 DE
+datos_z <- datos %>% mutate(across(all_of(vars), ~ as.numeric(scale(.x))))
+
+f_sat <- as.formula(paste("diagnosis_num ~", paste(vars, collapse = " + ")))
+m_sat <- glm(f_sat, data = datos_z, family = binomial)
+summary(m_sat)
+```
+
+```{r vif-saturado}
+data.frame(Variable = etiq[vars], VIF = fn(vif(m_sat), 1)) %>% kable(row.names = FALSE)
+```
+
+```{r fig-correlacion, fig.height=5.5, fig.width=7, fig.cap="Figura 3. Correlación de Spearman entre las características nucleares."}
+cor_m <- cor(datos[, vars], method = "spearman")
+dimnames(cor_m) <- list(etiq, etiq)
+as.data.frame(as.table(cor_m)) %>%
+  ggplot(aes(Var1, factor(Var2, levels = rev(etiq)), fill = Freq)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = fn(Freq, 2)), size = 3) +
+  scale_fill_gradient2(low = "#2a78d6", mid = "#f2f1ee", high = "#eb6834",
+                       midpoint = 0, limits = c(-1, 1), name = "ρ") +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid = element_blank())
+```
+
+El modelo saturado presenta una **multicolinealidad severa**: el radio, el perímetro y el área tienen VIF de `r fn(vif(m_sat)["radius_mean"],0)`, `r fn(vif(m_sat)["perimeter_mean"],0)` y `r fn(vif(m_sat)["area_mean"],0)`, y se correlacionan entre sí con ρ ≈ 1 porque miden lo mismo: el tamaño del núcleo. Algo similar ocurre con la compacidad, la concavidad y los puntos cóncavos (ρ entre `r fn(min(cor_m[6:8,6:8]),2)` y `r fn(max(cor_m[6:8,6:8][cor_m[6:8,6:8] < 1]),2)`). Por eso los coeficientes del modelo saturado son inestables, tienen errores estándar enormes e incluso cambian de signo (el radio aparece con OR < 1, contradiciendo el análisis univariado). Este modelo no es interpretable y debe reducirse.
+
+### Reducción del modelo y supuestos
+
+**Paso 1, eliminar la colinealidad.** De cada grupo de variables redundantes se conserva una representativa:
+
+- **Tamaño:** radio (la medida más directa; perímetro y área derivan de ella).
+- **Concavidad del contorno:** puntos cóncavos (el mayor efecto univariado del grupo).
+
+```{r modelo-intermedio}
+m_int <- glm(diagnosis_num ~ radius_mean + texture_mean + smoothness_mean +
+               concave.points_mean + symmetry_mean + fractal_dimension_mean,
+             data = datos_z, family = binomial)
+data.frame(Variable = etiq[names(vif(m_int))], VIF = fn(vif(m_int), 2)) %>% kable(row.names = FALSE)
+drop1(m_int, test = "LRT")
+```
+
+Al eliminar las variables redundantes todos los VIF quedan por debajo de 5. La simetría y la dimensión fractal no aportan significativamente al modelo (LRT p > 0,05).
+
+**Paso 2, eliminar variables que no aportan.**
+
+```{r modelo-reducido}
+m_red <- glm(diagnosis_num ~ radius_mean + texture_mean + smoothness_mean + concave.points_mean,
+             data = datos_z, family = binomial)
+anova(m_red, m_int, test = "LRT")
+c(AIC_intermedio = AIC(m_int), AIC_reducido = AIC(m_red))
+```
+
+Excluir la simetría y la dimensión fractal no empeora el ajuste (LRT p = `r fn(anova(m_red, m_int, test = "LRT")[2,5],3)`) y el AIC es similar, por lo que se prefiere el modelo más simple.
+
+**Paso 3, supuesto de linealidad en el logit (Box-Tidwell).** Se agrega a cada predictor continuo, en su escala original, el término *X·ln(X)*; si su coeficiente es significativo, la relación entre esa variable y el logit no es lineal. Como los puntos cóncavos tienen valores iguales a 0, se les suma una constante pequeña (0,01).
+
+```{r box-tidwell}
+bt_dat <- datos %>% mutate(cp = concave.points_mean + 0.01)
+m_bt <- glm(diagnosis_num ~ radius_mean + texture_mean + smoothness_mean + cp +
+              I(radius_mean * log(radius_mean)) + I(texture_mean * log(texture_mean)) +
+              I(smoothness_mean * log(smoothness_mean)) + I(cp * log(cp)),
+            data = bt_dat, family = binomial)
+bt <- summary(m_bt)$coefficients[6:9, ]
+data.frame(Variable = c("Radio", "Textura", "Suavidad", "Puntos cóncavos"),
+           `Coef. X·ln(X)` = fn(bt[, 1]), `p` = fp(bt[, 4]), check.names = FALSE) %>%
+  kable(row.names = FALSE)
+```
+
+La **textura no cumple el supuesto de linealidad** (p `r fp(bt[2,4])`); las demás variables sí. La relación de la textura con el logit no es una recta: el coeficiente negativo indica una curva cóncava, en la que el logit sube rápido en los valores bajos y medios y cada vez menos en los valores altos. Por eso la textura se incorpora **categorizada en terciles**, mediante dos variables *dummy*:
+
+| Tercil | Rango de textura | Dummy `Media` | Dummy `Alta` |
+|---|---|:-:|:-:|
+| Baja (referencia) | `r fn(cortes_tex[1])`–`r fn(cortes_tex[2])` | 0 | 0 |
+| Media | `r fn(cortes_tex[2])`–`r fn(cortes_tex[3])` | 1 | 0 |
+| Alta | `r fn(cortes_tex[3])`–`r fn(cortes_tex[4])` | 0 | 1 |
+
+R crea las dummies automáticamente al incluir un factor; se muestran explícitamente para verificar la codificación:
+
+```{r dummies}
+head(model.matrix(~ textura_cat, data = datos))
+```
+
+```{r modelo-terciles}
+m_lin <- glm(diagnosis_num ~ radius_mean + texture_mean + smoothness_mean + concave.points_mean,
+             data = datos_z, family = binomial)
+m_final <- glm(diagnosis_num ~ radius_mean + textura_cat + smoothness_mean + concave.points_mean,
+               data = datos_z, family = binomial)
+c(AIC_textura_lineal = AIC(m_lin), AIC_textura_terciles = AIC(m_final))
+```
+
+Con la textura en terciles el AIC mejora (`r fn(AIC(m_final),1)` vs. `r fn(AIC(m_lin),1)`).
+
+### Modificación de efecto (interacciones)
+
+Se evalúan las interacciones biológicamente plausibles entre las variables del modelo, comparando cada modelo con interacción contra el modelo sin ella (LRT):
+
+```{r interacciones}
+inter <- c("radius_mean:textura_cat", "radius_mean:concave.points_mean",
+           "radius_mean:smoothness_mean", "textura_cat:concave.points_mean",
+           "textura_cat:smoothness_mean", "smoothness_mean:concave.points_mean")
+res_int <- t(sapply(inter, function(it) {
+  mi <- update(m_final, as.formula(paste(". ~ . +", it)))
+  a <- anova(m_final, mi, test = "LRT")
+  c(gl = a$Df[2], LRT = a$Deviance[2], p = a$`Pr(>Chi)`[2])
+}))
+data.frame(`Interacción` = gsub("_mean|_cat", "", inter),
+           gl = res_int[, "gl"], `Chi²` = fn(res_int[, "LRT"]), p = fp(res_int[, "p"]),
+           check.names = FALSE) %>% kable(row.names = FALSE)
+```
+
+Ninguna interacción es significativa (todas con p > `r fn(floor(min(res_int[, "p"]) * 100) / 100, 2)`), es decir, **no hay evidencia de modificación de efecto**: la asociación de cada característica con la malignidad es similar en todos los niveles de las demás.
+
+### Confusión
+
+Se compara el OR de cada variable en el modelo final con el OR que resulta al excluir, una por vez, cada una de las demás. Un cambio mayor al 10 % indica que la variable excluida actúa como **confusora** de esa asociación.
+
+```{r confusion}
+or_final <- exp(coef(m_final))
+preds <- c("radius_mean", "textura_cat", "smoothness_mean", "concave.points_mean")
+etiq_p <- c(radius_mean = "Radio", textura_cat = "Textura (terciles)",
+            smoothness_mean = "Suavidad", concave.points_mean = "Puntos cóncavos")
+coef_lab <- c(radius_mean = "Radio", textura_catMedia = "Textura media",
+              textura_catAlta = "Textura alta", smoothness_mean = "Suavidad",
+              concave.points_mean = "Puntos cóncavos")
+
+conf <- sapply(preds, function(excl) {
+  m_sin <- update(m_final, as.formula(paste(". ~ . -", excl)))
+  or_sin <- exp(coef(m_sin))
+  comunes <- setdiff(names(coef_lab), names(coef(m_final))[grepl(excl, names(coef(m_final)))])
+  out <- setNames(rep(NA, length(coef_lab)), names(coef_lab))
+  out[comunes] <- 100 * (or_sin[comunes] - or_final[comunes]) / or_final[comunes]
+  out
+})
+conf_tab <- data.frame(OR = coef_lab[rownames(conf)], check.names = FALSE)
+for (j in preds) conf_tab[[paste("Sin", etiq_p[j])]] <- ifelse(is.na(conf[, j]), "—", paste0(fn(conf[, j], 1), " %"))
+kable(conf_tab, row.names = FALSE, caption = "Cambio porcentual del OR al excluir cada variable del modelo final")
+```
+
+```{r crudo-ajustado}
+or_crudo <- sapply(names(coef_lab), function(cf) {
+  v <- if (grepl("textura", cf)) "textura_cat" else cf
+  m <- glm(as.formula(paste("diagnosis_num ~", v)), data = datos_z, family = binomial)
+  exp(coef(m)[cf])
+})
+data.frame(Variable = coef_lab, `OR crudo` = fn(or_crudo), `OR ajustado` = fn(or_final[names(coef_lab)]),
+           `Cambio` = paste0(fn(100 * (or_crudo - or_final[names(coef_lab)]) / or_final[names(coef_lab)], 0), " %"),
+           check.names = FALSE) %>% kable(row.names = FALSE)
+```
+
+- **El radio y los puntos cóncavos se confunden mutuamente.** Sus OR crudos son mucho mayores que los ajustados porque ambas variables están correlacionadas (ρ ≈ `r fn(cor(datos$radius_mean, datos$concave.points_mean, method = "spearman"), 2)`): los núcleos grandes también tienden a tener contornos más irregulares. En el análisis crudo, parte del efecto atribuido a una corresponde en realidad a la otra.
+- **La suavidad actúa como confusora** aunque su propio efecto sea marginal: al excluirla, los OR del radio, la textura y los puntos cóncavos cambian más de un 10 %. Por ese motivo **se conserva en el modelo** (criterio de selección intencionada de Hosmer y Lemeshow).
+- En el sentido opuesto, la textura tiene un OR ajustado mayor que el crudo: el ajuste "desenmascara" parte de su asociación.
+
+### Modelo final
+
+```{r modelo-final}
+summary(m_final)
+
+ic <- exp(confint.default(m_final))
+tab_final <- data.frame(
+  Variable = c("(Intercepto)", coef_lab[names(coef(m_final))[-1]]),
+  `β` = fn(coef(m_final), 3),
+  `OR (IC 95 %)` = paste0(fn(or_final), " (", fn(ic[, 1]), "–", fn(ic[, 2]), ")"),
+  p = fp(summary(m_final)$coefficients[, 4]),
+  check.names = FALSE)
+kable(tab_final, row.names = FALSE, caption = "Modelo logístico final. Variables continuas estandarizadas (OR por 1 DE).")
+```
+
+```{r fig-forest, fig.height=3.6, fig.width=7, fig.cap="Figura 4. OR ajustados del modelo final (IC 95 %, escala logarítmica)."}
+data.frame(var = coef_lab[names(coef(m_final))[-1]], OR = or_final[-1], LI = ic[-1, 1], LS = ic[-1, 2]) %>%
+  mutate(var = factor(var, levels = rev(var))) %>%
+  ggplot(aes(OR, var)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey50") +
+  geom_errorbarh(aes(xmin = LI, xmax = LS), height = 0.2, color = col_dx["Maligno"], linewidth = 0.8) +
+  geom_point(size = 3, color = col_dx["Maligno"]) +
+  scale_x_log10(breaks = c(0.5, 1, 2, 5, 10, 20, 50, 100, 200)) +
+  labs(x = "OR ajustado (escala log)", y = NULL)
+```
+
+**Interpretación (manteniendo constantes las demás variables):**
+
+- **Radio:** por cada aumento de 1 DE (`r fn(sd_dat["radius_mean"])` unidades), los odds de malignidad se multiplican por `r fn(or_final["radius_mean"],1)` (IC 95 %: `r fn(ic["radius_mean",1],1)`–`r fn(ic["radius_mean",2],1)`).
+- **Textura:** respecto de las masas con textura baja, los odds de malignidad son `r fn(or_final["textura_catMedia"],1)` veces mayores con textura media y `r fn(or_final["textura_catAlta"],1)` veces mayores con textura alta.
+- **Puntos cóncavos:** por cada aumento de 1 DE (`r fn(sd_dat["concave.points_mean"],3)` unidades), los odds de malignidad se multiplican por `r fn(or_final["concave.points_mean"],1)` (IC 95 %: `r fn(ic["concave.points_mean",1],1)`–`r fn(ic["concave.points_mean",2],1)`).
+- **Suavidad:** OR = `r fn(or_final["smoothness_mean"])` por 1 DE, no significativo (p = `r fn(summary(m_final)$coefficients["smoothness_mean",4],3)`); se conserva por su rol como confusora.
+
+Los intervalos de confianza son amplios porque las variables discriminan casi perfectamente y hay pocas masas con valores intermedios; la dirección y la significación de los efectos son, sin embargo, claras.
+
+### Verificación de supuestos del modelo final
+
+```{r supuestos-final}
+data.frame(Variable = etiq_p[rownames(vif(m_final))],
+           `GVIF^(1/(2·gl))` = fn(vif(m_final)[, 3], 2), check.names = FALSE) %>% kable(row.names = FALSE)
+
+cook <- cooks.distance(m_final)
+c(n_cook_mayor_4n = sum(cook > 4 / nrow(datos)), cook_max = round(max(cook), 3))
+
+# Sensibilidad: reajuste sin las observaciones con mayor influencia
+m_sin_inf <- update(m_final, data = datos_z[cook <= 4 / nrow(datos), ])
+signif(cbind(OR_completo = exp(coef(m_final)), OR_sin_influyentes = exp(coef(m_sin_inf))), 3)
+# Clasificación del modelo sin influyentes: ¿separación completa?
+table(Predicho = fitted(m_sin_inf) > 0.5, Observado = m_sin_inf$y)
+```
+
+```{r fig-cook, fig.height=3.2, fig.width=7, fig.cap="Figura 5. Distancia de Cook de cada observación."}
+data.frame(obs = seq_along(cook), cook = cook, dx = datos$diagnostico) %>%
+  ggplot(aes(obs, cook, color = dx)) +
+  geom_segment(aes(xend = obs, yend = 0), alpha = 0.6) +
+  geom_hline(yintercept = 4 / nrow(datos), linetype = "dashed", color = "grey40") +
+  scale_color_manual(values = col_dx) +
+  labs(x = "Observación", y = "Distancia de Cook", color = "Diagnóstico")
+```
+
+- **Independencia:** cada fila corresponde a una masa distinta.
+- **Multicolinealidad:** todos los GVIF corregidos son menores que 2.
+- **Linealidad en el logit:** se cumple para el radio, la suavidad y los puntos cóncavos (Box-Tidwell); la textura se resolvió con terciles.
+- **Observaciones influyentes:** `r sum(cook > 4/nrow(datos))` observaciones superan el umbral 4/n, pero ninguna se acerca a 1 (máximo = `r fn(max(cook),3)`). Al excluirlas, el resto de las masas queda **perfectamente separado** (el modelo clasifica todo sin error) y los OR tienden a infinito, es decir, el modelo deja de ser estimable. Esas observaciones no son errores, sino los casos "difíciles" (benignas con valores altos o malignas con valores bajos) que justamente informan sobre la zona de superposición entre grupos. Por eso **se conservan**.
+
+### Bondad de ajuste y capacidad discriminativa
+
+```{r hosmer-lemeshow}
+# Test de Hosmer-Lemeshow (equivalente a ResourceSelection::hoslem.test)
+hosmer_lemeshow <- function(y, p, g = 10) {
+  grupos <- cut(p, breaks = unique(quantile(p, probs = seq(0, 1, 1 / g))), include.lowest = TRUE)
+  obs <- tapply(y, grupos, sum); esp <- tapply(p, grupos, sum); n <- tapply(y, grupos, length)
+  chi2 <- sum((obs - esp)^2 / (esp * (1 - esp / n)))
+  gl <- length(n) - 2
+  list(chi2 = chi2, gl = gl, p = 1 - pchisq(chi2, gl))
+}
+p_hat <- fitted(m_final)
+hl <- hosmer_lemeshow(datos$diagnosis_num, p_hat)
+hl
+```
+
+El test de Hosmer-Lemeshow no rechaza un buen ajuste (χ² = `r fn(hl$chi2)`, gl = `r hl$gl`, p = `r fn(hl$p,3)`): las probabilidades predichas concuerdan con las proporciones observadas.
+
+```{r confusion-matriz}
+pred_cat <- factor(ifelse(p_hat >= 0.5, "Maligno", "Benigno"), levels = c("Benigno", "Maligno"))
+mc <- table(Predicho = pred_cat, Observado = datos$diagnostico)
+mc
+VP <- mc["Maligno", "Maligno"]; VN <- mc["Benigno", "Benigno"]
+FP <- mc["Maligno", "Benigno"]; FN <- mc["Benigno", "Maligno"]
+metricas <- c(Sensibilidad = VP / (VP + FN), Especificidad = VN / (VN + FP),
+              VPP = VP / (VP + FP), VPN = VN / (VN + FN),
+              Exactitud = (VP + VN) / sum(mc))
+data.frame(`Métrica` = names(metricas), Valor = paste0(fn(100 * metricas, 1), " %")) %>% kable(row.names = FALSE)
+```
+
+```{r roc-cv}
+roc_final <- roc(datos$diagnosis_num, p_hat, quiet = TRUE)
+auc_ic <- ci.auc(roc_final)
+
+# Validación cruzada de 10 particiones, repetida 10 veces
+auc_cv <- replicate(10, {
+  folds <- sample(rep(1:10, length.out = nrow(datos_z)))
+  p_cv <- numeric(nrow(datos_z))
+  for (k in 1:10) {
+    m_k <- update(m_final, data = datos_z[folds != k, ])
+    p_cv[folds == k] <- predict(m_k, newdata = datos_z[folds == k, ], type = "response")
+  }
+  as.numeric(auc(datos_z$diagnosis_num, p_cv, quiet = TRUE))
+})
+c(AUC_aparente = as.numeric(auc(roc_final)), AUC_validacion_cruzada = mean(auc_cv))
+```
+
+```{r fig-roc-calibracion, fig.height=4.2, fig.width=9, fig.cap="Figura 6. Curva ROC (izquierda) y calibración por deciles de riesgo predicho (derecha)."}
+g_roc <- data.frame(fpr = 1 - roc_final$specificities, tpr = roc_final$sensitivities) %>%
+  arrange(fpr, tpr) %>%
+  ggplot(aes(fpr, tpr)) +
+  geom_abline(linetype = "dashed", color = "grey60") +
+  geom_path(color = col_dx["Maligno"], linewidth = 1) +
+  annotate("text", x = 0.6, y = 0.25, label = paste0("AUC = ", fn(auc(roc_final), 3))) +
+  coord_equal() +
+  labs(x = "1 − Especificidad", y = "Sensibilidad", title = "Curva ROC")
+
+g_cal <- data.frame(y = datos$diagnosis_num, p = p_hat) %>%
+  mutate(decil = ntile(p, 10)) %>%
+  group_by(decil) %>% summarise(pred = mean(p), obs = mean(y)) %>%
+  ggplot(aes(pred, obs)) +
+  geom_abline(linetype = "dashed", color = "grey60") +
+  geom_line(color = col_dx["Benigno"], linewidth = 0.8) +
+  geom_point(color = col_dx["Benigno"], size = 2.5) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "Probabilidad predicha", y = "Proporción observada", title = "Calibración")
+
+grid.arrange(g_roc, g_cal, ncol = 2)
+```
+
+El modelo tiene una **capacidad discriminativa excelente**: AUC = `r fn(auc(roc_final),3)` (IC 95 %: `r fn(auc_ic[1],3)`–`r fn(auc_ic[3],3)`). En la validación cruzada el AUC se mantiene en `r fn(mean(auc_cv),3)`, por lo que el optimismo por evaluar con los mismos datos es mínimo. Con un punto de corte de 0,5, la sensibilidad es de `r fn(100*metricas["Sensibilidad"],1)` % y la especificidad, de `r fn(100*metricas["Especificidad"],1)` %.
+
+# Conclusión
+
+## Resumen de resultados
+
+1. **Diseño:** estudio observacional, transversal, analítico y retrospectivo de exactitud diagnóstica, con `r nrow(datos)` masas mamarias evaluadas por PAF (`r fn(100*prev,1)` % malignas).
+2. **Univariado:** `r sum(uni$p_holm < 0.05)` de las 10 características nucleares difieren entre masas benignas y malignas (Mann-Whitney con corrección de Holm). Los efectos más grandes corresponden al tamaño y a la concavidad del contorno.
+3. **Multivariado:** el modelo saturado es inutilizable por multicolinealidad severa (VIF > 100). Tras reducirlo, cuatro características explican la malignidad: **radio**, **textura** (en terciles, por no linealidad), **puntos cóncavos** y **suavidad** (esta última, como confusora).
+4. **Confusión y modificación de efecto:** el radio y los puntos cóncavos se confunden mutuamente y la suavidad confunde a las demás asociaciones. No hay evidencia de modificación de efecto.
+5. **Desempeño:** discriminación excelente (AUC = `r fn(auc(roc_final),3)`; AUC por validación cruzada = `r fn(mean(auc_cv),3)`), buena calibración (Hosmer-Lemeshow p = `r fn(hl$p,3)`), sensibilidad de `r fn(100*metricas["Sensibilidad"],1)` % y especificidad de `r fn(100*metricas["Especificidad"],1)` %.
+
+## Interpretación
+
+Los núcleos de las masas malignas son **más grandes, más heterogéneos en su tinción (textura) y de contorno más irregular (más puntos cóncavos)** que los de las masas benignas. Cada una de estas características se asocia con la malignidad de forma independiente de las demás. Esto coincide con los criterios citológicos clásicos de malignidad (pleomorfismo, aumento del tamaño nuclear, irregularidad de la membrana nuclear). Con solo cuatro medidas obtenidas automáticamente de la imagen de una PAF, el modelo clasifica correctamente el `r fn(100*metricas["Exactitud"],1)` % de las masas, lo que muestra el potencial del análisis de imágenes para objetivar la citología.
+
+Los OR deben interpretarse como **asociaciones**, no como efectos causales: las características nucleares son manifestaciones del tumor, no sus causas. La "confusión" entre radio y puntos cóncavos refleja que ambas expresan, en parte, el mismo proceso de transformación maligna.
+
+## Limitaciones
+
+- **Validez externa:** se trata de un único centro de referencia en EE. UU. a comienzos de los 90, con posible sesgo de espectro. El rendimiento podría ser menor en otras poblaciones o con otros equipos de digitalización.
+- **Estándar de referencia:** la base no detalla cómo se confirmó cada diagnóstico benigno (posible sesgo de verificación).
+- **Validación:** la validación es solo interna; el modelo requeriría validación externa antes de cualquier uso clínico.
+- **Punto de corte:** el corte de 0,5 no es necesariamente el óptimo clínico. En cáncer conviene priorizar la sensibilidad, por lo que podría elegirse un corte menor a costa de más falsos positivos.
+
+## Respuestas a la matriz de evaluación
+
+| Pregunta | Dónde se responde |
+|---|---|
+| 1. Diseño y PICO | Secciones 1.4 y 2.1 |
+| 2. Sesgos | Sección 2.5 |
+| 3. Variables, distribución y test | Secciones 2.4, 3.1 y 2.7 |
+| 4. Análisis univariado | Sección 3.2 |
+| 5. Modelo multivariado saturado, supuestos y dummies | Secciones 3.3.1 a 3.3.3, 3.3.6 y 3.3.7 |
+| 6. Confusoras y modificadoras de efecto | Secciones 3.3.4 y 3.3.5 |
+| 7. Resumen, conclusión y gráficos | Sección 4 y Figuras 1 a 6 |
+
+# Referencias bibliográficas
+
+1. Kim J, Harper A, McCormack V, Sung H, Houssami N, Morgan E, et al. Global patterns and trends in breast cancer incidence and mortality across 185 countries. *Nat Med*. 2025. doi:10.1038/s41591-025-03502-3.
+2. Street WN, Wolberg WH, Mangasarian OL. Nuclear feature extraction for breast tumor diagnosis. *Proc SPIE*. 1993;1905:861–870.
+3. Wolberg WH, Street WN, Mangasarian OL. Machine learning techniques to diagnose breast cancer from image-processed nuclear features of fine needle aspirates. *Cancer Lett*. 1994;77(2–3):163–171.
+4. Wolberg WH, Mangasarian OL, Street N, Street WN. Breast Cancer Wisconsin (Diagnostic) [Dataset]. UCI Machine Learning Repository; 1995. doi:10.24432/C5DW2B.
+5. UCI Machine Learning. Breast Cancer Wisconsin (Diagnostic) Data Set. Kaggle. <https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data>.
+6. Hosmer DW, Lemeshow S, Sturdivant RX. *Applied Logistic Regression*. 3.ª ed. Hoboken: Wiley; 2013.
+7. Peduzzi P, Concato J, Kemper E, Holford TR, Feinstein AR. A simulation study of the number of events per variable in logistic regression analysis. *J Clin Epidemiol*. 1996;49(12):1373–1379.
+8. Box GEP, Tidwell PW. Transformation of the independent variables. *Technometrics*. 1962;4(4):531–550.
+9. Cohen J. *Statistical Power Analysis for the Behavioral Sciences*. 2.ª ed. Hillsdale: Lawrence Erlbaum; 1988.
+10. Ransohoff DF, Feinstein AR. Problems of spectrum and bias in evaluating the efficacy of diagnostic tests. *N Engl J Med*. 1978;299(17):926–930.
+11. Bossuyt PM, Reitsma JB, Bruns DE, Gatsonis CA, Glasziou PP, Irwig L, et al. STARD 2015: an updated list of essential items for reporting diagnostic accuracy studies. *BMJ*. 2015;351:h5527.
+12. von Elm E, Altman DG, Egger M, Pocock SJ, Gøtzsche PC, Vandenbroucke JP. The Strengthening the Reporting of Observational Studies in Epidemiology (STROBE) statement. *Lancet*. 2007;370(9596):1453–1457.
+13. R Core Team. *R: A Language and Environment for Statistical Computing*. Viena: R Foundation for Statistical Computing. <https://www.R-project.org/>.
