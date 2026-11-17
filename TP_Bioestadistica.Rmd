@@ -1,7 +1,7 @@
 ---
 title: "Características morfométricas nucleares y malignidad de masas mamarias"
 subtitle: "Trabajo Práctico Integrador — 16.43 Bioestadística (ITBA)"
-author: "Integrantes: COMPLETAR"
+author: "Integrantes: Melanie Natasha Mauas (63517), Agostina Almendros, Thiago"
 date: "`r format(Sys.Date(), '%d/%m/%Y')`"
 output:
   html_document:
@@ -49,6 +49,8 @@ fn <- function(x, d = 2) formatC(x, format = "f", digits = d, decimal.mark = ","
 El cáncer de mama es la neoplasia más diagnosticada en mujeres: en 2022 se estimaron alrededor de 2,3 millones de casos nuevos y 670.000 muertes en el mundo (Kim et al., 2025). Distinguir a tiempo si una masa mamaria es benigna o maligna permite evitar cirugías innecesarias y, a la vez, no demorar el tratamiento de los tumores malignos.
 
 La **punción aspirativa con aguja fina (PAF)** es un método mínimamente invasivo y de bajo costo para obtener células de la masa. Su principal limitación es que la interpretación citológica es visual y depende del observador. Para objetivarla, Street, Wolberg y Mangasarian (1993) desarrollaron un sistema de análisis de imágenes que digitaliza el preparado, delimita el contorno de cada núcleo celular y calcula diez características morfométricas (tamaño, textura, forma, etc.). La hipótesis subyacente es que los núcleos malignos son más grandes, más heterogéneos y de contorno más irregular.
+
+La selección de estas características responde a su **plausibilidad biológica**: el radio, el perímetro y el área describen dimensiones del tamaño nuclear; la textura representa la variabilidad de la intensidad de gris dentro del núcleo; y las medidas de concavidad describen irregularidades del contorno. Estas dimensiones se relacionan con rasgos morfológicos que pueden observarse en células malignas, como el aumento del tamaño nuclear y la irregularidad de la membrana. Por lo tanto, las variables se consideran por su significado morfológico y no solamente por su disponibilidad en la base de datos. Esta hipótesis se evalúa estadísticamente, sin asumir de antemano que todas las características deban diferir entre diagnósticos.
 
 ## Dataset y fuente
 
@@ -148,7 +150,7 @@ data.frame(
   check.names = FALSE) %>% kable(row.names = FALSE)
 ```
 
-Se excluyeron del análisis las versiones `_se` (miden la precisión de la estimación, no una característica del tumor) y `_worst` (están casi perfectamente correlacionadas con las medias). Incluirlas habría triplicado el número de variables con información redundante, aumentando la colinealidad y el sobreajuste.
+Se excluyeron del análisis las versiones `_se` (miden la variabilidad de la estimación, no una característica morfológica adicional del tumor) y `_worst` (resumen los valores más altos de cada característica y presentan elevada redundancia con las medias). Incluir las tres versiones de cada característica habría aumentado considerablemente la cantidad de predictores con información superpuesta, con el riesgo de incrementar la multicolinealidad y la inestabilidad del modelo. Esta decisión define un conjunto inicial de diez predictores con interpretación morfológica directa; no implica que las medidas excluidas carezcan de utilidad en cualquier otro objetivo analítico.
 
 **Variable derivada:** a partir del análisis de supuestos (sección 3.3.3) la textura se categorizó en **terciles** (baja, media, alta), que se incluyen en el modelo mediante dos variables *dummy* con "baja" como categoría de referencia.
 
@@ -197,20 +199,24 @@ data.frame(
 - **Muestra disponible.** Con `r n_B` benignas y `r n_M` malignas se superan ambos requisitos. El poder para detectar un efecto pequeño-moderado (d = 0,3) es de `r fn(100*pot_d03,1)` %, y el de un efecto moderado (d = 0,5), `r if (pot_d05 > 0.999) "superior al 99,9 %" else paste0("de ", fn(100*pot_d05,1), " %")`. El menor efecto detectable con 80 % de potencia es d = `r fn(d_min)`.
 - **EPV observados.** Con `r n_M` eventos, el modelo saturado tiene `r fn(n_M/k_sat,1)` EPV y el modelo final (5 coeficientes), `r fn(n_M/5,1)` EPV, muy por encima de 10.
 
+Estos cálculos deben interpretarse como referencias de suficiencia muestral y no como una garantía de ausencia de sobreajuste. La regla de 10 eventos por parámetro es orientativa y no contempla por sí sola la separación, la distribución de los predictores, la complejidad de las transformaciones ni el proceso de selección del modelo. Además, como se utiliza una base ya recolectada, el cálculo evalúa la adecuación de la muestra disponible y no define un reclutamiento prospectivo.
+
 ## Métodos estadísticos
 
-1. **Descriptivo:** mediana y rango intercuartílico (RIC) por grupo diagnóstico, y coeficiente de asimetría.
-2. **Normalidad:** test de Shapiro-Wilk en cada grupo. Homogeneidad de varianzas: test de Levene.
-3. **Comparación univariada:** si ambos grupos son normales, test *t* de Welch; si no, **test U de Mann-Whitney**. Como tamaño de efecto se informa la correlación biserial por rangos (*r*~rb~). Los p-valores se corrigen por comparaciones múltiples con el método de Holm. Para la textura en terciles se usa el test χ² de independencia. Se estiman además los OR crudos por regresión logística simple.
-4. **Colinealidad:** matriz de correlación de Spearman y factor de inflación de la varianza (VIF; se considera problemático un VIF > 5).
-5. **Multivariado:** regresión logística binaria. Las variables continuas se estandarizan (media 0, DE 1), de modo que cada OR expresa el cambio en los odds de malignidad por cada aumento de 1 desvío estándar. Se parte de un **modelo teórico saturado** con las 10 variables y se reduce eliminando la colinealidad y comparando modelos anidados con el test de razón de verosimilitud (LRT) y el AIC.
-6. **Supuestos del modelo:** independencia de las observaciones (una masa por fila), ausencia de multicolinealidad (VIF), linealidad entre cada predictor continuo y el logit (test de Box-Tidwell) y ausencia de observaciones influyentes (distancia de Cook).
-7. **Confusión y modificación de efecto:** se considera confusora una variable cuya exclusión cambia en más de un 10 % el OR de otra. La modificación de efecto se evalúa agregando términos de interacción y comparándolos con LRT.
-8. **Bondad de ajuste y desempeño:** test de Hosmer-Lemeshow, curva de calibración, matriz de confusión con punto de corte 0,5 (sensibilidad, especificidad, VPP, VPN) y AUC-ROC. El rendimiento se valida internamente por validación cruzada de 10 particiones repetida 10 veces.
+1. **Descriptivo:** mediana y rango intercuartílico (RIC) por grupo diagnóstico, y coeficiente de asimetría. Se priorizan medidas robustas porque varias características presentan distribuciones asimétricas y valores extremos.
+2. **Normalidad:** test de Shapiro-Wilk en cada grupo. Homogeneidad de varianzas: test de Levene. Estos análisis se utilizan junto con histogramas y boxplots para caracterizar la distribución; no se interpretan como una decisión automática aislada.
+3. **Comparación univariada:** si ambos grupos son aproximadamente normales, test *t* de Welch; si no, **test U de Mann-Whitney**. Welch se elige porque compara medias de dos grupos independientes y no requiere asumir igualdad de varianzas. Mann-Whitney permite comparar las distribuciones/rangos sin exigir normalidad; no se interpreta necesariamente como un test de medianas salvo que las formas de las distribuciones sean similares. Como tamaño de efecto se informa la correlación biserial por rangos (*r*~rb~). Los p-valores se corrigen por comparaciones múltiples con el método de Holm para limitar falsos positivos al realizar diez contrastes. Para la textura en terciles se usa el test χ² de independencia, dado que ambas variables son categóricas. Se estiman además los OR crudos por regresión logística simple.
+4. **Colinealidad:** matriz de correlación de Spearman y factor de inflación de la varianza (VIF; se considera problemático un VIF > 5). Spearman se utiliza por la posible asimetría y porque interesa detectar asociaciones monotónicas entre predictores.
+5. **Multivariado:** regresión logística binaria, porque el diagnóstico es dicotómico. Las variables continuas se estandarizan (media 0, DE 1), de modo que cada OR expresa el cambio en los odds de malignidad por cada aumento de 1 desvío estándar. Se parte de un **modelo inicial completo con las 10 variables candidatas** (denominado en el informe modelo teórico saturado) y se reduce considerando la redundancia biológica/estadística, la colinealidad y la comparación de modelos anidados mediante el test de razón de verosimilitud (LRT) y el AIC. En sentido estadístico estricto, "modelo saturado" tiene otra definición; aquí se usa para referirse al modelo inicial que incluye todos los predictores candidatos.
+6. **Supuestos del modelo:** independencia de las observaciones (una masa por fila), ausencia de multicolinealidad (VIF), linealidad entre cada predictor continuo y el logit (test de Box-Tidwell) y evaluación de observaciones influyentes (distancia de Cook). La normalidad de los predictores no es un supuesto de la regresión logística.
+7. **Confusión y modificación de efecto:** se explora confusión comparando los OR ajustados con los obtenidos al excluir una variable por vez; un cambio mayor al 10 % se toma como señal orientativa, no como prueba definitiva. La modificación de efecto se evalúa agregando interacciones con plausibilidad biológica y comparándolas con el modelo sin interacción mediante LRT.
+8. **Bondad de ajuste y desempeño:** test de Hosmer-Lemeshow, curva de calibración, matriz de confusión con punto de corte 0,5 (sensibilidad, especificidad, VPP, VPN) y AUC-ROC. El rendimiento se valida internamente por validación cruzada de 10 particiones repetida 10 veces. El punto de corte 0,5 se utiliza como referencia descriptiva y no se asume que sea necesariamente el umbral clínico óptimo.
 
 Nivel de significación: α = 0,05. Software: `r R.version.string`.
 
 # Resultados
+
+Las decisiones analíticas se interpretan en función de la pregunta de investigación: primero se describe cómo difieren las características morfométricas entre diagnósticos; luego se evalúa cuáles mantienen una asociación ajustada; finalmente se estudia si el conjunto de variables permite discriminar entre masas benignas y malignas. Esta secuencia evita confundir una diferencia univariada con un efecto independiente o con capacidad predictiva.
 
 ## Descripción de las variables
 
