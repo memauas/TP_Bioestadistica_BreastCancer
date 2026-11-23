@@ -1,7 +1,7 @@
 ---
 title: "Características morfométricas nucleares y malignidad de masas mamarias"
 subtitle: "Trabajo Práctico Integrador — 16.43 Bioestadística (ITBA)"
-author: "Integrantes: Melanie Natasha Mauas (63517), Agostina Almendros, Thiago Sayegh (62260)"
+author: "Integrantes: Melanie Natasha Mauas (63517), Agostina Almendros (63096), Thiago Sayegh (62260)"
 date: "`r format(Sys.Date(), '%d/%m/%Y')`"
 output:
   html_document:
