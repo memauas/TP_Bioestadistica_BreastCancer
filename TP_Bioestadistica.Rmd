@@ -1,7 +1,7 @@
 ---
 title: "Características morfométricas nucleares y malignidad de masas mamarias"
 subtitle: "Trabajo Práctico Integrador — 16.43 Bioestadística (ITBA)"
-author: "Integrantes: Melanie Natasha Mauas (63517), Agostina Almendros, Thiago"
+author: "Integrantes: Melanie Natasha Mauas (63517), Agostina Almendros, Thiago Sayegh (62260)"
 date: "`r format(Sys.Date(), '%d/%m/%Y')`"
 output:
   html_document:
@@ -18,7 +18,8 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.align = "center", fig.width = 8, fig.height = 5, dpi = 110)
 
 # Paquetes necesarios (instalar una sola vez desde la consola, NO dentro del Rmd):
-# install.packages(c("dplyr", "tidyr", "ggplot2", "car", "pwr", "pROC", "gridExtra", "knitr"))
+# install.packages(c("dplyr", "tidyr", "ggplot2", "car", "pwr", "pROC", "gridExtra", "knitr",
+#                    "ResourceSelection"))   # ResourceSelection: solo para verificar Hosmer-Lemeshow
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -161,8 +162,8 @@ Se excluyeron del análisis las versiones `_se` (miden la variabilidad de la est
 | **Selección / espectro** | Casos de un único centro de referencia, no de una muestra poblacional; los tumores pueden ser más avanzados o más "típicos" que en la práctica general (Ransohoff y Feinstein, 1978). | No es corregible con los datos; se acota la validez externa a poblaciones similares y se lo explicita como limitación. |
 | **Verificación** | Si no todas las masas benignas tuvieron confirmación histológica (por ejemplo, confirmación por seguimiento), el estándar de referencia no es homogéneo. | La base no informa el método de confirmación por caso; se reconoce como limitación. |
 | **Información / medición** | El operador marca inicialmente cada núcleo y elige qué zona del preparado digitalizar; esto introduce variabilidad. | Las medidas son calculadas por software, lo que reduce la subjetividad respecto de la lectura visual. |
-| **Confusión** | Las características nucleares están fuertemente correlacionadas entre sí; la asociación cruda de una puede deberse a otra. | Análisis multivariado y evaluación del cambio en el OR crudo vs. ajustado (criterio del 10 %). |
-| **Sobreajuste / optimismo** | Evaluar el modelo con los mismos datos con que se ajustó sobreestima su rendimiento. | Modelo parsimonioso y validación cruzada de 10 particiones repetida. |
+| **Confusión** | Las características nucleares están fuertemente correlacionadas entre sí; la asociación cruda de una puede deberse a otra. | Análisis multivariado y evaluación del cambio en los coeficientes (log-odds) crudos vs. ajustados (criterio heurístico del 10 %). |
+| **Sobreajuste / optimismo** | Evaluar el modelo con los mismos datos con que se ajustó sobreestima su rendimiento. | Modelo parsimonioso y validación cruzada de 10 particiones repetida, incluyendo una variante que repite la selección de variables dentro de cada partición. |
 
 ## Cálculo del tamaño muestral y poder de la muestra
 
@@ -174,7 +175,9 @@ prev <- n_M / nrow(datos)
 # (a) Comparación univariada de dos grupos: efecto moderado (d de Cohen = 0,5),
 #     alfa = 0,05 bilateral, potencia = 0,80
 n_t <- pwr.t.test(d = 0.5, sig.level = 0.05, power = 0.80, type = "two.sample")$n
-n_mw <- n_t / 0.864   # corrección por eficiencia relativa asintótica de Mann-Whitney
+# Corrección conservadora para Mann-Whitney: 0,864 es la cota mínima de su eficiencia
+# relativa asintótica frente al test t (bajo normalidad sería 3/pi = 0,955)
+n_mw <- n_t / 0.864
 
 # (b) Regresión logística: regla de 10 eventos por variable (Peduzzi et al., 1996)
 k_sat <- 10
@@ -205,12 +208,12 @@ Estos cálculos deben interpretarse como referencias de suficiencia muestral y n
 
 1. **Descriptivo:** mediana y rango intercuartílico (RIC) por grupo diagnóstico, y coeficiente de asimetría. Se priorizan medidas robustas porque varias características presentan distribuciones asimétricas y valores extremos.
 2. **Normalidad:** test de Shapiro-Wilk en cada grupo. Homogeneidad de varianzas: test de Levene. Estos análisis se utilizan junto con histogramas y boxplots para caracterizar la distribución; no se interpretan como una decisión automática aislada.
-3. **Comparación univariada:** si ambos grupos son aproximadamente normales, test *t* de Welch; si no, **test U de Mann-Whitney**. Welch se elige porque compara medias de dos grupos independientes y no requiere asumir igualdad de varianzas. Mann-Whitney permite comparar las distribuciones/rangos sin exigir normalidad; no se interpreta necesariamente como un test de medianas salvo que las formas de las distribuciones sean similares. Como tamaño de efecto se informa la correlación biserial por rangos (*r*~rb~). Los p-valores se corrigen por comparaciones múltiples con el método de Holm para limitar falsos positivos al realizar diez contrastes. Para la textura en terciles se usa el test χ² de independencia, dado que ambas variables son categóricas. Se estiman además los OR crudos por regresión logística simple.
+3. **Comparación univariada:** si ambos grupos son aproximadamente normales, test *t* de Welch; si no, **test U de Mann-Whitney**. Welch se elige porque compara medias de dos grupos independientes y no requiere asumir igualdad de varianzas. Mann-Whitney permite comparar las distribuciones/rangos sin exigir normalidad; no se interpreta necesariamente como un test de medianas salvo que las formas de las distribuciones sean similares. Usar Shapiro-Wilk como criterio de elección es la **estrategia operativa adoptada en este trabajo, no una regla universal**: con muestras de este tamaño (357 y 212) Shapiro-Wilk detecta desvíos mínimos de la normalidad, y el test de Welch es robusto ante desviaciones moderadas gracias al teorema central del límite, por lo que también habría sido una opción válida. Cada test se acompaña del tamaño de efecto que le corresponde: la **correlación biserial por rangos** (*r*~rb~ = 2U/(n~M~·n~B~) − 1) para Mann-Whitney y la ***d* de Cohen** (diferencia de medias estandarizada) para Welch; se informan ambas para todas las variables, la segunda además porque es la escala en la que se calculó el poder. En R, el estadístico W que devuelve `wilcox.test()` ya es la U de Mann-Whitney del primer grupo (cantidad de pares en los que la masa maligna supera a la benigna), no la suma de rangos, por lo que se usa directamente. Los p-valores se corrigen por comparaciones múltiples con el método de Holm para limitar falsos positivos al realizar diez contrastes. Para la textura en terciles se usa el test χ² de independencia, dado que ambas variables son categóricas. Se estiman además los OR crudos por regresión logística simple.
 4. **Colinealidad:** matriz de correlación de Spearman y factor de inflación de la varianza (VIF; se considera problemático un VIF > 5). Spearman se utiliza por la posible asimetría y porque interesa detectar asociaciones monotónicas entre predictores.
 5. **Multivariado:** regresión logística binaria, porque el diagnóstico es dicotómico. Las variables continuas se estandarizan (media 0, DE 1), de modo que cada OR expresa el cambio en los odds de malignidad por cada aumento de 1 desvío estándar. Se parte de un **modelo inicial completo con las 10 variables candidatas** (denominado en el informe modelo teórico saturado) y se reduce considerando la redundancia biológica/estadística, la colinealidad y la comparación de modelos anidados mediante el test de razón de verosimilitud (LRT) y el AIC. En sentido estadístico estricto, "modelo saturado" tiene otra definición; aquí se usa para referirse al modelo inicial que incluye todos los predictores candidatos.
 6. **Supuestos del modelo:** independencia de las observaciones (una masa por fila), ausencia de multicolinealidad (VIF), linealidad entre cada predictor continuo y el logit (test de Box-Tidwell) y evaluación de observaciones influyentes (distancia de Cook). La normalidad de los predictores no es un supuesto de la regresión logística.
-7. **Confusión y modificación de efecto:** se explora confusión comparando los OR ajustados con los obtenidos al excluir una variable por vez; un cambio mayor al 10 % se toma como señal orientativa, no como prueba definitiva. La modificación de efecto se evalúa agregando interacciones con plausibilidad biológica y comparándolas con el modelo sin interacción mediante LRT.
-8. **Bondad de ajuste y desempeño:** test de Hosmer-Lemeshow, curva de calibración, matriz de confusión con punto de corte 0,5 (sensibilidad, especificidad, VPP, VPN) y AUC-ROC. El rendimiento se valida internamente por validación cruzada de 10 particiones repetida 10 veces. El punto de corte 0,5 se utiliza como referencia descriptiva y no se asume que sea necesariamente el umbral clínico óptimo.
+7. **Confusión y modificación de efecto:** se explora confusión comparando los coeficientes ajustados (β, en escala log-odds) con los obtenidos al excluir una variable por vez; un cambio relativo mayor al 10 % se toma como señal orientativa: es un criterio heurístico, no un test estadístico. El cambio se mide sobre β y no sobre el OR porque el OR es una transformación exponencial y, con OR grandes como los de este trabajo, el mismo cambio en β se traduce en porcentajes mucho mayores. La modificación de efecto se evalúa agregando interacciones con plausibilidad biológica y comparándolas con el modelo sin interacción mediante LRT.
+8. **Bondad de ajuste y desempeño:** test de Hosmer-Lemeshow, curva de calibración, matriz de confusión con punto de corte 0,5 (sensibilidad, especificidad, VPP, VPN) y AUC-ROC. El test de Hosmer-Lemeshow se implementa a mano y se verifica contra `ResourceSelection::hoslem.test`; un resultado no significativo indica que no se detecta falta de ajuste, no que la calibración sea perfecta. El rendimiento se valida internamente por validación cruzada de 10 particiones repetida 10 veces, de dos maneras: (a) reajustando en cada partición el modelo final ya elegido y (b) repitiendo dentro de cada partición todo el proceso de selección de variables (descarte por VIF > 5 y eliminación hacia atrás por LRT), porque la selección hecha con todos los datos hace que (a) no sea una evaluación completamente independiente. El punto de corte 0,5 se utiliza como referencia descriptiva y no se asume que sea necesariamente el umbral clínico óptimo.
 
 Nivel de significación: α = 0,05. Software: `r R.version.string`.
 
@@ -253,7 +256,7 @@ datos %>%
   theme(axis.text.x = element_blank())
 ```
 
-Ninguna variable es normal en ambos grupos (Shapiro-Wilk p < 0,05 en casi todos los casos) y la mayoría presenta **asimetría positiva** (cola a derecha), algo esperable en medidas de tamaño y forma que son estrictamente positivas. En la mayoría de las variables las varianzas también difieren entre grupos (Levene). Por eso las comparaciones se hacen con el **test de Mann-Whitney**, que no requiere normalidad. La respuesta es dicotómica (Bernoulli), por lo que el modelo multivariado adecuado es la **regresión logística**.
+Ninguna variable es normal en ambos grupos (Shapiro-Wilk p < 0,05 en casi todos los casos) y la mayoría presenta **asimetría positiva** (cola a derecha), algo esperable en medidas de tamaño y forma que son estrictamente positivas. En la mayoría de las variables las varianzas también difieren entre grupos (Levene). Por eso, según la estrategia definida en métodos, las comparaciones se hacen con el **test de Mann-Whitney**, que no requiere normalidad. Con estos tamaños de grupo el test de Welch también habría sido defendible; dado el tamaño de los efectos observados, la elección no cambia las conclusiones. La respuesta es dicotómica (Bernoulli), por lo que el modelo multivariado adecuado es la **regresión logística**.
 
 ## Análisis univariado
 
@@ -269,12 +272,17 @@ uni <- lapply(vars, function(v) {
   } else {
     test <- "Mann-Whitney"; p <- wilcox.test(xm, xb, exact = FALSE)$p.value
   }
+  # En R, el estadístico W de wilcox.test(x, y) ya es la U de Mann-Whitney de x:
+  # W = (suma de rangos de x) - n_x (n_x + 1) / 2 = n.º de pares con x > y. No hay que convertirlo.
   U <- wilcox.test(xm, xb, exact = FALSE)$statistic
-  r_rb <- 2 * U / (length(xm) * length(xb)) - 1
+  r_rb <- 2 * U / (length(xm) * length(xb)) - 1          # tamaño de efecto de Mann-Whitney
+  # d de Cohen (DE combinada): tamaño de efecto para diferencia de medias (t / Welch)
+  de_comb <- sqrt(((length(xm) - 1) * var(xm) + (length(xb) - 1) * var(xb)) / (length(x) - 2))
+  d_cohen <- (mean(xm) - mean(xb)) / de_comb
   z <- (x - mean(x)) / sd(x)
   m <- glm(datos$diagnosis_num ~ z, family = binomial)
   or <- exp(c(coef(m)[2], confint.default(m)[2, ]))
-  data.frame(var = v, Variable = etiq[v], Test = test, p = p, r_rb = r_rb,
+  data.frame(var = v, Variable = etiq[v], Test = test, p = p, r_rb = r_rb, d = d_cohen,
              OR = or[1], LI = or[2], LS = or[3])
 })
 uni <- do.call(rbind, uni)
@@ -282,12 +290,12 @@ uni$p_holm <- p.adjust(uni$p, method = "holm")
 
 uni %>%
   transmute(Variable, Test, `p` = fp(p), `p (Holm)` = fp(p_holm),
-            `r rb` = fn(r_rb),
+            `r rb` = fn(r_rb), `d de Cohen` = fn(d),
             `OR crudo por 1 DE (IC 95 %)` = paste0(fn(OR), " (", fn(LI), "–", fn(LS), ")")) %>%
-  kable(row.names = FALSE, align = "llcccc")
+  kable(row.names = FALSE, align = "llccccc")
 ```
 
-Tras corregir por comparaciones múltiples, **`r sum(uni$p_holm < 0.05)` de las 10 características difieren significativamente** entre masas benignas y malignas. `r if (any(uni$p_holm >= 0.05)) paste0("Solo la ", paste(tolower(uni$Variable[uni$p_holm >= 0.05]), collapse = " y la "), " no muestra diferencias. ") else ""`Los efectos más grandes corresponden a las medidas de **tamaño** (radio, perímetro, área) y de **concavidad del contorno** (puntos cóncavos, concavidad), con *r*~rb~ cercanos a 0,9: en esas variables, una masa maligna tiene un valor mayor que una benigna en la gran mayoría de los pares comparados. La textura y la suavidad muestran efectos moderados.
+Tras corregir por comparaciones múltiples, **`r sum(uni$p_holm < 0.05)` de las 10 características difieren significativamente** entre masas benignas y malignas. `r if (any(uni$p_holm >= 0.05)) paste0("Solo la ", paste(tolower(uni$Variable[uni$p_holm >= 0.05]), collapse = " y la "), " no muestra diferencias. ") else ""`Los efectos más grandes corresponden a las medidas de **tamaño** (radio, perímetro, área) y de **concavidad del contorno** (puntos cóncavos, concavidad), con *r*~rb~ cercanos a 0,9: en esas variables, una masa maligna tiene un valor mayor que una benigna en la gran mayoría de los pares comparados. En escala de diferencia de medias, esas mismas variables tienen *d* de Cohen de 2 o más, muy por encima del umbral convencional de efecto grande (0,8). La textura y la suavidad muestran efectos moderados en *r*~rb~ (*d* entre `r fn(min(uni$d[uni$var %in% c("texture_mean", "smoothness_mean")]))` y `r fn(max(uni$d[uni$var %in% c("texture_mean", "smoothness_mean")]))`). Como todas las comparaciones se resolvieron con Mann-Whitney, el tamaño de efecto que acompaña al test es *r*~rb~; la *d* de Cohen se informa como medida complementaria.
 
 ```{r textura-terciles}
 cortes_tex <- quantile(datos$texture_mean, c(0, 1/3, 2/3, 1))
@@ -443,10 +451,11 @@ Ninguna interacción es significativa (todas con p > `r fn(floor(min(res_int[, "
 
 ### Confusión
 
-Se compara el OR de cada variable en el modelo final con el OR que resulta al excluir, una por vez, cada una de las demás. Un cambio mayor al 10 % indica que la variable excluida actúa como **confusora** de esa asociación.
+Se compara el coeficiente (β, log-odds) de cada variable en el modelo final con el que resulta al excluir, una por vez, cada una de las demás. Un cambio relativo mayor al 10 % se toma como **señal orientativa** de que la variable excluida actúa como confusora de esa asociación; es un criterio heurístico y no un test estadístico.
 
 ```{r confusion}
 or_final <- exp(coef(m_final))
+b_final  <- coef(m_final)
 preds <- c("radius_mean", "textura_cat", "smoothness_mean", "concave.points_mean")
 etiq_p <- c(radius_mean = "Radio", textura_cat = "Textura (terciles)",
             smoothness_mean = "Suavidad", concave.points_mean = "Puntos cóncavos")
@@ -456,15 +465,16 @@ coef_lab <- c(radius_mean = "Radio", textura_catMedia = "Textura media",
 
 conf <- sapply(preds, function(excl) {
   m_sin <- update(m_final, as.formula(paste(". ~ . -", excl)))
-  or_sin <- exp(coef(m_sin))
+  b_sin <- coef(m_sin)
   comunes <- setdiff(names(coef_lab), names(coef(m_final))[grepl(excl, names(coef(m_final)))])
   out <- setNames(rep(NA, length(coef_lab)), names(coef_lab))
-  out[comunes] <- 100 * (or_sin[comunes] - or_final[comunes]) / or_final[comunes]
+  out[comunes] <- 100 * (b_sin[comunes] - b_final[comunes]) / b_final[comunes]
   out
 })
-conf_tab <- data.frame(OR = coef_lab[rownames(conf)], check.names = FALSE)
+conf_tab <- data.frame(Coeficiente = coef_lab[rownames(conf)], check.names = FALSE)
 for (j in preds) conf_tab[[paste("Sin", etiq_p[j])]] <- ifelse(is.na(conf[, j]), "—", paste0(fn(conf[, j], 1), " %"))
-kable(conf_tab, row.names = FALSE, caption = "Cambio porcentual del OR al excluir cada variable del modelo final")
+kable(conf_tab, row.names = FALSE,
+      caption = "Cambio porcentual del coeficiente β (log-odds) al excluir cada variable del modelo final")
 ```
 
 ```{r crudo-ajustado}
@@ -473,14 +483,20 @@ or_crudo <- sapply(names(coef_lab), function(cf) {
   m <- glm(as.formula(paste("diagnosis_num ~", v)), data = datos_z, family = binomial)
   exp(coef(m)[cf])
 })
-data.frame(Variable = coef_lab, `OR crudo` = fn(or_crudo), `OR ajustado` = fn(or_final[names(coef_lab)]),
-           `Cambio` = paste0(fn(100 * (or_crudo - or_final[names(coef_lab)]) / or_final[names(coef_lab)], 0), " %"),
+b_crudo <- log(or_crudo); b_ajust <- b_final[names(coef_lab)]
+data.frame(Variable = coef_lab,
+           `β crudo` = fn(b_crudo), `β ajustado` = fn(b_ajust),
+           `Cambio en β` = paste0(fn(100 * (b_crudo - b_ajust) / b_ajust, 0), " %"),
+           `OR crudo` = fn(or_crudo), `OR ajustado` = fn(or_final[names(coef_lab)]),
            check.names = FALSE) %>% kable(row.names = FALSE)
 ```
 
-- **El radio y los puntos cóncavos se confunden mutuamente.** Sus OR crudos son mucho mayores que los ajustados porque ambas variables están correlacionadas (ρ ≈ `r fn(cor(datos$radius_mean, datos$concave.points_mean, method = "spearman"), 2)`): los núcleos grandes también tienden a tener contornos más irregulares. En el análisis crudo, parte del efecto atribuido a una corresponde en realidad a la otra.
-- **La suavidad actúa como confusora** aunque su propio efecto sea marginal: al excluirla, los OR del radio, la textura y los puntos cóncavos cambian más de un 10 %. Por ese motivo **se conserva en el modelo** (criterio de selección intencionada de Hosmer y Lemeshow).
-- En el sentido opuesto, la textura tiene un OR ajustado mayor que el crudo: el ajuste "desenmascara" parte de su asociación.
+- **El radio y los puntos cóncavos se confunden mutuamente.** Al excluir uno, el coeficiente del otro aumenta alrededor de un `r fn(abs(conf["radius_mean", "concave.points_mean"]), 0)` %, y sus coeficientes crudos son mayores que los ajustados, porque ambas variables están correlacionadas (ρ ≈ `r fn(cor(datos$radius_mean, datos$concave.points_mean, method = "spearman"), 2)`): los núcleos grandes también tienden a tener contornos más irregulares. En el análisis crudo, parte de la asociación atribuida a una corresponde en realidad a la otra.
+- **La suavidad muestra señal de confusión sobre el radio y los puntos cóncavos** aunque su propia asociación sea marginal: al excluirla, sus coeficientes cambian un `r fn(abs(conf["radius_mean", "smoothness_mean"]), 0)` % y un `r fn(abs(conf["concave.points_mean", "smoothness_mean"]), 0)` %, respectivamente. Sobre la textura el cambio es menor al 10 % (`r fn(abs(conf["textura_catMedia", "smoothness_mean"]), 0)` % y `r fn(abs(conf["textura_catAlta", "smoothness_mean"]), 0)` %), por lo que no se la considera confusora de esa asociación. Por su efecto sobre el radio y los puntos cóncavos **se conserva en el modelo** (criterio de selección intencionada de Hosmer y Lemeshow).
+- **La textura y el radio** también se modifican mutuamente: sin la textura, el coeficiente del radio cambia un `r fn(abs(conf["radius_mean", "textura_cat"]), 0)` %. En el sentido opuesto al del radio, la textura tiene un coeficiente ajustado mayor que el crudo: el ajuste "desenmascara" parte de su asociación.
+- El coeficiente de la suavidad es el más inestable ante cualquier exclusión; como es pequeño y no significativo, sus cambios porcentuales son grandes y no deben sobreinterpretarse.
+
+Estas lecturas son orientativas: el umbral del 10 % es una convención, y en variables que son manifestaciones correlacionadas de un mismo proceso (ver Interpretación) "confusión" describe superposición de información más que un sesgo causal clásico.
 
 ### Modelo final
 
@@ -526,9 +542,13 @@ data.frame(Variable = etiq_p[rownames(vif(m_final))],
 cook <- cooks.distance(m_final)
 c(n_cook_mayor_4n = sum(cook > 4 / nrow(datos)), cook_max = round(max(cook), 3))
 
-# Sensibilidad: reajuste sin las observaciones con mayor influencia
+# Sensibilidad: reajuste (a) sin las 10 observaciones de mayor distancia de Cook
+#               y (b) sin todas las que superan 4/n
+top10 <- order(cook, decreasing = TRUE)[1:10]
+m_sin10   <- update(m_final, data = datos_z[-top10, ])
 m_sin_inf <- update(m_final, data = datos_z[cook <= 4 / nrow(datos), ])
-signif(cbind(OR_completo = exp(coef(m_final)), OR_sin_influyentes = exp(coef(m_sin_inf))), 3)
+signif(cbind(OR_completo = exp(coef(m_final)), OR_sin_top10 = exp(coef(m_sin10)),
+             OR_sin_mayores_4n = exp(coef(m_sin_inf))), 3)
 # Clasificación del modelo sin influyentes: ¿separación completa?
 table(Predicho = fitted(m_sin_inf) > 0.5, Observado = m_sin_inf$y)
 ```
@@ -545,25 +565,38 @@ data.frame(obs = seq_along(cook), cook = cook, dx = datos$diagnostico) %>%
 - **Independencia:** cada fila corresponde a una masa distinta.
 - **Multicolinealidad:** todos los GVIF corregidos son menores que 2.
 - **Linealidad en el logit:** se cumple para el radio, la suavidad y los puntos cóncavos (Box-Tidwell); la textura se resolvió con terciles.
-- **Observaciones influyentes:** `r sum(cook > 4/nrow(datos))` observaciones superan el umbral 4/n, pero ninguna se acerca a 1 (máximo = `r fn(max(cook),3)`). Al excluirlas, el resto de las masas queda **perfectamente separado** (el modelo clasifica todo sin error) y los OR tienden a infinito, es decir, el modelo deja de ser estimable. Esas observaciones no son errores, sino los casos "difíciles" (benignas con valores altos o malignas con valores bajos) que justamente informan sobre la zona de superposición entre grupos. Por eso **se conservan**.
+- **Observaciones influyentes:** hay **observaciones potencialmente influyentes y el modelo es sensible a ellas**. `r sum(cook > 4/nrow(datos))` observaciones superan el umbral 4/n; que el máximo (`r fn(max(cook),3)`) sea menor que 1 no alcanza para descartar influencia, porque el análisis de sensibilidad muestra que las estimaciones cambian mucho: al excluir solo las 10 de mayor distancia de Cook, el OR del radio pasa de `r fn(exp(coef(m_final))["radius_mean"],1)` a `r fn(exp(coef(m_sin10))["radius_mean"],1)` y el de la textura alta de `r fn(exp(coef(m_final))["textura_catAlta"],1)` a `r fn(exp(coef(m_sin10))["textura_catAlta"],1)`; al excluir las `r sum(cook > 4/nrow(datos))`, el resto de las masas queda **perfectamente separado** (el modelo clasifica todo sin error) y los OR tienden a infinito, es decir, el modelo deja de ser estimable. Esas observaciones no son errores de carga, sino los casos "difíciles" (benignas con valores altos o malignas con valores bajos) que informan sobre la zona de superposición entre grupos; excluirlas sería descartar justamente la información que permite estimar el modelo, por lo que **se conservan**. La consecuencia es que la **dirección** de las asociaciones es estable (todos los OR siguen siendo mayores que 1), pero su **magnitud** depende de unas pocas decenas de casos y debe interpretarse con cautela.
 
 ### Bondad de ajuste y capacidad discriminativa
 
 ```{r hosmer-lemeshow}
-# Test de Hosmer-Lemeshow (equivalente a ResourceSelection::hoslem.test)
+# Test de Hosmer-Lemeshow, implementación propia
 hosmer_lemeshow <- function(y, p, g = 10) {
   grupos <- cut(p, breaks = unique(quantile(p, probs = seq(0, 1, 1 / g))), include.lowest = TRUE)
   obs <- tapply(y, grupos, sum); esp <- tapply(p, grupos, sum); n <- tapply(y, grupos, length)
   chi2 <- sum((obs - esp)^2 / (esp * (1 - esp / n)))
   gl <- length(n) - 2
-  list(chi2 = chi2, gl = gl, p = 1 - pchisq(chi2, gl))
+  list(chi2 = chi2, gl = gl, p = 1 - pchisq(chi2, gl), n_grupos = length(n),
+       tabla = data.frame(n = as.vector(n), Observados = as.vector(obs),
+                          Esperados = round(as.vector(esp), 2)))
 }
 p_hat <- fitted(m_final)
 hl <- hosmer_lemeshow(datos$diagnosis_num, p_hat)
-hl
+hl[c("chi2", "gl", "p", "n_grupos")]
+
+# Grupos realmente formados: malignas observadas y esperadas en cada decil de riesgo
+kable(cbind(Grupo = seq_len(hl$n_grupos), hl$tabla), row.names = FALSE,
+      caption = "Hosmer-Lemeshow: malignas observadas y esperadas por grupo de riesgo predicho")
+
+# Verificación contra una implementación estándar
+if (requireNamespace("ResourceSelection", quietly = TRUE)) {
+  hl_std <- ResourceSelection::hoslem.test(datos$diagnosis_num, p_hat, g = 10)
+  print(c(chi2_propio = hl$chi2, chi2_hoslem.test = unname(hl_std$statistic),
+          p_propio = hl$p, p_hoslem.test = hl_std$p.value))
+}
 ```
 
-El test de Hosmer-Lemeshow no rechaza un buen ajuste (χ² = `r fn(hl$chi2)`, gl = `r hl$gl`, p = `r fn(hl$p,3)`): las probabilidades predichas concuerdan con las proporciones observadas.
+El test de Hosmer-Lemeshow **no detecta falta de ajuste** (χ² = `r fn(hl$chi2)`, gl = `r hl$gl`, p = `r fn(hl$p,3)`). Se formaron efectivamente `r hl$n_grupos` grupos y la implementación propia coincide con `ResourceSelection::hoslem.test`. Este resultado **no demuestra que la calibración sea perfecta**: un p alto solo indica que no hay evidencia suficiente contra el ajuste, y el test tiene poca potencia y depende de cómo se armen los grupos. Además, como el modelo discrimina casi perfectamente, en `r sum(hl$tabla$Esperados < 1)` de los `r hl$n_grupos` grupos se espera menos de una masa maligna, por lo que la aproximación χ² es débil y en la práctica el test se apoya en los pocos grupos de riesgo intermedio. Por eso se complementa con la curva de calibración (Figura 6).
 
 ```{r confusion-matriz}
 pred_cat <- factor(ifelse(p_hat >= 0.5, "Maligno", "Benigno"), levels = c("Benigno", "Maligno"))
@@ -581,17 +614,63 @@ data.frame(`Métrica` = names(metricas), Valor = paste0(fn(100 * metricas, 1), "
 roc_final <- roc(datos$diagnosis_num, p_hat, quiet = TRUE)
 auc_ic <- ci.auc(roc_final)
 
-# Validación cruzada de 10 particiones, repetida 10 veces
-auc_cv <- replicate(10, {
-  folds <- sample(rep(1:10, length.out = nrow(datos_z)))
-  p_cv <- numeric(nrow(datos_z))
-  for (k in 1:10) {
-    m_k <- update(m_final, data = datos_z[folds != k, ])
-    p_cv[folds == k] <- predict(m_k, newdata = datos_z[folds == k, ], type = "response")
+# Selección automática de variables, para poder repetirla dentro de cada partición.
+# Imita el proceso manual: (1) descartar de a una la variable de mayor VIF hasta que todos
+# sean <= 5; (2) eliminación hacia atrás por LRT (p > 0,05). La textura entra como continua.
+seleccionar <- function(dtr) {
+  cols <- vars
+  repeat {
+    if (length(cols) < 2) break
+    v <- vif(glm(reformulate(cols, "diagnosis_num"), data = dtr, family = binomial))
+    if (max(v) > 5) cols <- setdiff(cols, names(which.max(v))) else break
   }
-  as.numeric(auc(datos_z$diagnosis_num, p_cv, quiet = TRUE))
+  repeat {
+    if (length(cols) < 2) break
+    d1 <- drop1(glm(reformulate(cols, "diagnosis_num"), data = dtr, family = binomial), test = "LRT")
+    pv <- setNames(d1$`Pr(>Chi)`[-1], rownames(d1)[-1])
+    if (max(pv) > 0.05) cols <- setdiff(cols, names(which.max(pv))) else break
+  }
+  cols
+}
+
+# Validación cruzada de 10 particiones, repetida 10 veces
+#  (a) modelo fijo: se reajusta el modelo final ya elegido
+#  (b) proceso completo: estandarización y selección de variables repetidas en cada partición
+y_obs <- datos$diagnosis_num
+cv <- lapply(1:10, function(r) {
+  folds <- sample(rep(1:10, length.out = nrow(datos)))
+  p_fijo <- p_sel <- numeric(nrow(datos)); elegidas <- character(0)
+  for (k in 1:10) {
+    tr <- folds != k
+    # (a)
+    m_k <- update(m_final, data = datos_z[tr, ])
+    p_fijo[!tr] <- predict(m_k, newdata = datos_z[!tr, ], type = "response")
+    # (b) todo se calcula solo con los datos de entrenamiento
+    mu <- sapply(datos[tr, vars], mean); de <- sapply(datos[tr, vars], sd)
+    dtr <- datos[tr, c("diagnosis_num", vars)]; dte <- datos[!tr, c("diagnosis_num", vars)]
+    dtr[vars] <- scale(dtr[vars], mu, de); dte[vars] <- scale(dte[vars], mu, de)
+    cols <- seleccionar(dtr)
+    m_s <- glm(reformulate(cols, "diagnosis_num"), data = dtr, family = binomial)
+    p_sel[!tr] <- predict(m_s, newdata = dte, type = "response")
+    elegidas <- c(elegidas, cols)
+  }
+  list(auc_fijo = as.numeric(auc(y_obs, p_fijo, quiet = TRUE)),
+       auc_sel  = as.numeric(auc(y_obs, p_sel, quiet = TRUE)),
+       sens = mean(p_fijo[y_obs == 1] >= 0.5), esp = mean(p_fijo[y_obs == 0] < 0.5),
+       elegidas = elegidas)
 })
-c(AUC_aparente = as.numeric(auc(roc_final)), AUC_validacion_cruzada = mean(auc_cv))
+auc_cv     <- sapply(cv, `[[`, "auc_fijo")
+auc_cv_sel <- sapply(cv, `[[`, "auc_sel")
+sens_cv    <- mean(sapply(cv, `[[`, "sens")); esp_cv <- mean(sapply(cv, `[[`, "esp"))
+
+c(AUC_aparente = as.numeric(auc(roc_final)), AUC_CV_modelo_fijo = mean(auc_cv),
+  AUC_CV_con_seleccion = mean(auc_cv_sel))
+c(Sensibilidad_CV = sens_cv, Especificidad_CV = esp_cv)
+
+# ¿Qué variables elige el proceso automático? (% de los 100 ajustes en que queda cada una)
+frec_sel <- sort(table(unlist(lapply(cv, `[[`, "elegidas"))), decreasing = TRUE)
+data.frame(Variable = etiq[names(frec_sel)], `% de particiones` = as.vector(frec_sel),
+           check.names = FALSE) %>% kable(row.names = FALSE)
 ```
 
 ```{r fig-roc-calibracion, fig.height=4.2, fig.width=9, fig.cap="Figura 6. Curva ROC (izquierda) y calibración por deciles de riesgo predicho (derecha)."}
@@ -617,7 +696,9 @@ g_cal <- data.frame(y = datos$diagnosis_num, p = p_hat) %>%
 grid.arrange(g_roc, g_cal, ncol = 2)
 ```
 
-El modelo tiene una **capacidad discriminativa excelente**: AUC = `r fn(auc(roc_final),3)` (IC 95 %: `r fn(auc_ic[1],3)`–`r fn(auc_ic[3],3)`). En la validación cruzada el AUC se mantiene en `r fn(mean(auc_cv),3)`, por lo que el optimismo por evaluar con los mismos datos es mínimo. Con un punto de corte de 0,5, la sensibilidad es de `r fn(100*metricas["Sensibilidad"],1)` % y la especificidad, de `r fn(100*metricas["Especificidad"],1)` %.
+El modelo tiene una **capacidad discriminativa excelente**: AUC = `r fn(auc(roc_final),3)` (IC 95 %: `r fn(auc_ic[1],3)`–`r fn(auc_ic[3],3)`). Con un punto de corte de 0,5, la sensibilidad aparente es de `r fn(100*metricas["Sensibilidad"],1)` % y la especificidad, de `r fn(100*metricas["Especificidad"],1)` % (`r fn(100*sens_cv,1)` % y `r fn(100*esp_cv,1)` % en validación cruzada).
+
+En la validación cruzada del modelo final el AUC es de `r fn(mean(auc_cv),3)`. Esta cifra **no es una evaluación completamente independiente**: las variables, los terciles de textura y la estandarización se definieron usando todos los datos antes de particionarlos, de modo que cada partición de prueba ya influyó en la forma del modelo; lo que se valida así es la estimación de los coeficientes, no el proceso de selección. Para evaluar el proceso completo se repitió la estandarización y la selección de variables dentro de cada partición, con un procedimiento automático que imita el manual: el AUC resultante es de `r fn(mean(auc_cv_sel),3)`. Como las tres cifras son muy cercanas, el optimismo parece pequeño, pero esta variante sigue siendo una aproximación (la selección manual incluyó decisiones, como categorizar la textura, que no se automatizaron; una validación cruzada anidada o una muestra externa serían lo ideal). La tabla de variables elegidas muestra además que el proceso automático no siempre llega a las mismas variables que el manual: dentro de cada grupo redundante elige a veces otro representante (por ejemplo, el área en lugar del radio, o la concavidad en lugar de los puntos cóncavos), pero conserva la misma estructura, con una medida de tamaño, la textura, la suavidad y una medida de concavidad del contorno. Es decir, lo estable es qué dimensiones morfológicas importan, no qué variable puntual las representa.
 
 # Conclusión
 
@@ -625,9 +706,9 @@ El modelo tiene una **capacidad discriminativa excelente**: AUC = `r fn(auc(roc_
 
 1. **Diseño:** estudio observacional, transversal, analítico y retrospectivo de exactitud diagnóstica, con `r nrow(datos)` masas mamarias evaluadas por PAF (`r fn(100*prev,1)` % malignas).
 2. **Univariado:** `r sum(uni$p_holm < 0.05)` de las 10 características nucleares difieren entre masas benignas y malignas (Mann-Whitney con corrección de Holm). Los efectos más grandes corresponden al tamaño y a la concavidad del contorno.
-3. **Multivariado:** el modelo saturado es inutilizable por multicolinealidad severa (VIF > 100). Tras reducirlo, cuatro características explican la malignidad: **radio**, **textura** (en terciles, por no linealidad), **puntos cóncavos** y **suavidad** (esta última, como confusora).
-4. **Confusión y modificación de efecto:** el radio y los puntos cóncavos se confunden mutuamente y la suavidad confunde a las demás asociaciones. No hay evidencia de modificación de efecto.
-5. **Desempeño:** discriminación excelente (AUC = `r fn(auc(roc_final),3)`; AUC por validación cruzada = `r fn(mean(auc_cv),3)`), buena calibración (Hosmer-Lemeshow p = `r fn(hl$p,3)`), sensibilidad de `r fn(100*metricas["Sensibilidad"],1)` % y especificidad de `r fn(100*metricas["Especificidad"],1)` %.
+3. **Multivariado:** el modelo saturado es inutilizable por multicolinealidad severa (VIF > 100). Tras reducirlo, el modelo final incluye cuatro características: **radio**, **textura** (en terciles, por no linealidad) y **puntos cóncavos**, asociadas significativamente con la malignidad, y **suavidad**, no significativa pero conservada por su señal de confusión. El modelo es sensible a un grupo de observaciones potencialmente influyentes: la dirección de las asociaciones es estable, pero la magnitud de los OR no.
+4. **Confusión y modificación de efecto:** según el cambio en los coeficientes (criterio heurístico del 10 %), el radio y los puntos cóncavos se confunden mutuamente y la suavidad muestra señal de confusión sobre ambos, pero no sobre la textura. No hay evidencia de modificación de efecto.
+5. **Desempeño:** discriminación excelente (AUC = `r fn(auc(roc_final),3)`; por validación cruzada, `r fn(mean(auc_cv),3)` con el modelo fijo y `r fn(mean(auc_cv_sel),3)` repitiendo la selección de variables en cada partición), sin evidencia de falta de ajuste (Hosmer-Lemeshow p = `r fn(hl$p,3)`, lo que no demuestra calibración perfecta), sensibilidad de `r fn(100*metricas["Sensibilidad"],1)` % y especificidad de `r fn(100*metricas["Especificidad"],1)` %.
 
 ## Interpretación
 
@@ -639,7 +720,9 @@ Los OR deben interpretarse como **asociaciones**, no como efectos causales: las 
 
 - **Validez externa:** se trata de un único centro de referencia en EE. UU. a comienzos de los 90, con posible sesgo de espectro. El rendimiento podría ser menor en otras poblaciones o con otros equipos de digitalización.
 - **Estándar de referencia:** la base no detalla cómo se confirmó cada diagnóstico benigno (posible sesgo de verificación).
-- **Validación:** la validación es solo interna; el modelo requeriría validación externa antes de cualquier uso clínico.
+- **Validación:** la validación es solo interna y la selección de variables se hizo con todos los datos; la variante con selección dentro de cada partición es una aproximación y no reemplaza a una validación cruzada anidada completa ni a una validación externa, necesaria antes de cualquier uso clínico.
+- **Estabilidad de las estimaciones:** la magnitud de los OR depende de unas pocas decenas de observaciones de la zona de superposición entre grupos (cuasi-separación), por lo que los valores puntuales deben tomarse con cautela.
+- **Decisiones analíticas:** la elección de Mann-Whitney a partir de Shapiro-Wilk y el umbral del 10 % para confusión son criterios operativos, no reglas universales.
 - **Punto de corte:** el corte de 0,5 no es necesariamente el óptimo clínico. En cáncer conviene priorizar la sensibilidad, por lo que podría elegirse un corte menor a costa de más falsos positivos.
 
 ## Respuestas a la matriz de evaluación
